@@ -47,7 +47,7 @@ export type AgentEvent =
   | { type: 'tool_call_result'; outcome: 'allowed' | 'denied'; result?: unknown; reason?: string }
   | { type: 'message_end'; usage: { inputTokens: number; outputTokens: number } }
   | { type: 'proposal'; id: string; tool: string; input: Record<string, unknown> }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; code?: string }
   | { type: 'step_count'; count: number }
   | { type: 'session_renamed'; sessionId: string; newTitle: string }
   | { type: 'pipeline_stage'; stage: string }
@@ -185,7 +185,12 @@ export class AgentRuntime {
         if (e.name === 'AbortError') {
           console.log('[Agent] Stream aborted by user (Halt All)');
           this.eventHandler({ type: 'error', message: 'Stream aborted (System Halt)' });
-          break; // Break the runtime loop entirely
+          break;
+        }
+        if (e.code === 'MODEL_NO_TOOLS') {
+          console.warn('[Agent] MODEL_NO_TOOLS:', e.message);
+          this.eventHandler({ type: 'error', code: 'MODEL_NO_TOOLS', message: e.message });
+          break;
         }
         throw e;
       } finally {
@@ -368,7 +373,7 @@ export class AgentRuntime {
       toolCallId: toolCall.id,
       toolCalls: toolCallPayload,
     });
-    await this.saveMessage('assistant', precedingText, undefined, toolCallPayload, toolCall.id);
+    await this.saveMessage('assistant', precedingText, undefined, toolCallPayload, toolCall.id, 'executed');
 
     const server = getMCPServer(serverId);
 

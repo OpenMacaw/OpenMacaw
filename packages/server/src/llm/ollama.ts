@@ -210,7 +210,22 @@ export class OllamaProvider implements LLMProvider {
       stream: true,
       ...(useJsonFormat ? { response_format: { type: 'json_object' } } : {}),
     };
-    const stream = await this.getClient().chat.completions.create(createParams, { signal }) as unknown as AsyncIterable<any>;
+    // ── API Call ──────────────────────────────────────────────────────────────
+    let stream: AsyncIterable<any>;
+    try {
+      stream = await this.getClient().chat.completions.create(createParams, { signal }) as unknown as AsyncIterable<any>;
+    } catch (apiErr: any) {
+      const msg: string = apiErr?.message ?? String(apiErr);
+      if (/does not support tools/i.test(msg) || /tool.*not.*support/i.test(msg)) {
+        // Throw a typed error so the agent runtime can emit MODEL_NO_TOOLS to the UI
+        const typedErr = new Error(
+          `Model "${model}" does not support tool use. Switch to a tool-capable model (e.g. qwen2.5-coder, llama3.2, mistral) in Settings.`
+        );
+        (typedErr as any).code = 'MODEL_NO_TOOLS';
+        throw typedErr;
+      }
+      throw apiErr;
+    }
 
     let inputTokens = 0;
     let outputTokens = 0;

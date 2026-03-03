@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useReducer } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Loader2, ShieldCheck, Shield, Check, Copy, AlertTriangle } from 'lucide-react';
+import { Trash2, Loader2, ShieldCheck, Shield, Check, Copy, AlertTriangle, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiFetch, getWsUrl, type AgentEvent } from '../api';
@@ -398,17 +398,67 @@ function hydrateMessage(msg: Message): Message {
 }
 
 
+// ── Chat State Reducer ────────────────────────────────────────────────────────
+type ChatState = {
+  isStreaming: boolean;
+  streamingContent: string;
+  chatError: { code: string; message: string } | null;
+  selectedServerId: string | null;
+  showGuardianOverlay: boolean;
+  sidebarVisible: boolean;
+};
+
+type ChatAction =
+  | { type: 'START_STREAM' }
+  | { type: 'APPEND_STREAM'; content: string }
+  | { type: 'SET_ERROR'; code?: string; message: string }
+  | { type: 'END_STREAM' }
+  | { type: 'RESET_STREAM' }
+  | { type: 'SET_SERVER'; id: string | null }
+  | { type: 'TOGGLE_GUARDIAN' }
+  | { type: 'TOGGLE_SIDEBAR' }
+  | { type: 'CLEAR_ERROR' };
+
+const initialChatState: ChatState = {
+  isStreaming: false,
+  streamingContent: '',
+  chatError: null,
+  selectedServerId: null,
+  showGuardianOverlay: false,
+  sidebarVisible: true,
+};
+
+function chatReducer(state: ChatState, action: ChatAction): ChatState {
+  switch (action.type) {
+    case 'START_STREAM':
+      return { ...state, isStreaming: true, streamingContent: '', chatError: null };
+    case 'APPEND_STREAM':
+      return { ...state, streamingContent: state.streamingContent + action.content };
+    case 'SET_ERROR':
+      return { ...state, isStreaming: false, chatError: { code: action.code || 'UNKNOWN', message: action.message } };
+    case 'END_STREAM':
+      return { ...state, isStreaming: false, streamingContent: '' };
+    case 'RESET_STREAM':
+      return { ...state, isStreaming: false, streamingContent: '', chatError: null };
+    case 'SET_SERVER':
+      return { ...state, selectedServerId: action.id };
+    case 'TOGGLE_GUARDIAN':
+      return { ...state, showGuardianOverlay: !state.showGuardianOverlay };
+    case 'TOGGLE_SIDEBAR':
+      return { ...state, sidebarVisible: !state.sidebarVisible };
+    case 'CLEAR_ERROR':
+      return { ...state, chatError: null };
+    default:
+      return state;
+  }
+}
+
 export default function Chat() {
   const { id: sessionId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(sessionId || null);
   const [input, setInput] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingContent, setStreamingContent] = useState('');
-  const [mockMessages, setMockMessages] = useState<Message[]>([]);
-  const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
-  const [showGuardianOverlay, setShowGuardianOverlay] = useState(false);
-  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [state, dispatch] = useReducer(chatReducer, initialChatState);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -416,6 +466,9 @@ export default function Chat() {
   const streamStartRef = useRef<number>(0);
   const streamingStartedRef = useRef(false);
   const queryClient = useQueryClient();
+
+  const { isStreaming, streamingContent, chatError, selectedServerId, showGuardianOverlay, sidebarVisible } = state;
+
 
   const { data: sessions, isLoading: sessionsLoading } = useQuery<Session[]>({
     queryKey: ['sessions'],
@@ -474,6 +527,7 @@ export default function Chat() {
       // Fix ghost chat: clear session if deleting the active one
       if (currentSessionId === deletedId) {
         setCurrentSessionId(null);
+        dispatch({ type: 'RESET_STREAM' });
         queryClient.removeQueries({ queryKey: ['session', deletedId] });
       }
     },
@@ -484,6 +538,12 @@ export default function Chat() {
       setCurrentSessionId(sessions[0].id);
     }
   }, [sessions, currentSessionId]);
+
+  // RESET state when switching sessions to prevent "ghost text"
+  useEffect(() => {
+    dispatch({ type: 'RESET_STREAM' });
+    setInput('');
+  }, [currentSessionId]);
 
   // Listen for new-chat events dispatched from the App sidebar
   useEffect(() => {
@@ -511,37 +571,36 @@ export default function Chat() {
 
       switch (data.type) {
         case 'text_delta':
-          if (!isStreaming) setIsStreaming(true);
-          // Dispatch first-chunk event to Inspector
           if (!streamingStartedRef.current) {
             streamingStartedRef.current = true;
+            dispatch({ type: 'START_STREAM' });
             window.dispatchEvent(new CustomEvent('openmacaw:inspector', {
               detail: { type: 'stream_start', tool: 'LLM', input: { event: 'Streaming response started' } }
             }));
           }
-          setStreamingContent(prev => prev + (data.content || ''));
+          dispatch({ type: 'APPEND_STREAM', content: data.content || '' });
           break;
         case 'tool_call_start':
-          if (!isStreaming) setIsStreaming(true);
+          if (!streamingStartedRef.current) {
+            streamingStartedRef.current = true;
+            dispatch({ type: 'START_STREAM' });
+          }
           window.dispatchEvent(new CustomEvent('openmacaw:inspector', {
             detail: { type: 'tool_call', tool: data.tool || 'unknown', input: { event: 'Tool call initiated' } }
           }));
-          setStreamingContent(prev => prev + `\n[Calling tool: ${data.tool}]`);
+          dispatch({ type: 'APPEND_STREAM', content: `\n[Calling tool: ${data.tool}]` });
           break;
         case 'tool_call_result':
           if (data.outcome === 'denied') {
-            setStreamingContent(prev => prev + `\n[Denied: ${data.reason}]`);
+            dispatch({ type: 'APPEND_STREAM', content: `\n[Denied: ${data.reason}]` });
           } else {
-            setStreamingContent(prev => prev + `\n[Tool result: ${JSON.stringify(data.result)}]`);
+            dispatch({ type: 'APPEND_STREAM', content: `\n[Tool result: ${JSON.stringify(data.result)}]` });
           }
           break;
         case 'message_end': {
           const responseTimeMs = streamStartRef.current > 0 ? Date.now() - streamStartRef.current : 0;
 
           // ── Stabilized Regex Intercept ───────────────────────────────────
-          // Scan the FINAL streaming content for embedded JSON tool calls.
-          // Mutate the session cache at the state level so the ApprovalCard
-          // renders from stable data, eliminating the render-loop flash.
           const finalContent = streamingContent;
           const toolCallPattern = /\{[\s\S]*?"name"\s*:\s*"([^"]+)"[\s\S]*?"arguments"\s*:\s*\{[\s\S]*?\}\s*\}/g;
           const tcMatch = toolCallPattern.exec(finalContent);
@@ -551,8 +610,6 @@ export default function Chat() {
               if (parsed.name && parsed.arguments) {
                 const stripped = finalContent.replace(toolCallPattern, '').trim();
                 const syntheticToolCalls = JSON.stringify([{ name: parsed.name, arguments: parsed.arguments, id: `fe-${Date.now()}` }]);
-                // Inject a synthetic proposal message into the session cache
-                // IMMUTABLE: create brand new arrays and objects at every level
                 queryClient.setQueryData(['session', currentSessionId], (old: any) => {
                   if (!old) return old;
                   const newMsg = {
@@ -566,9 +623,7 @@ export default function Chat() {
                     messages: [...(old.messages || []).map((m: any) => ({...m})), newMsg]
                   };
                 });
-                // Skip normal invalidation — we already injected the message
-                setIsStreaming(false);
-                setStreamingContent('');
+                dispatch({ type: 'END_STREAM' });
                 streamStartRef.current = 0;
                 streamingStartedRef.current = false;
                 window.dispatchEvent(new CustomEvent('openmacaw:telemetry', {
@@ -583,8 +638,7 @@ export default function Chat() {
             } catch { /* not valid JSON, continue normally */ }
           }
 
-          setIsStreaming(false);
-          setStreamingContent('');
+          dispatch({ type: 'END_STREAM' });
           streamStartRef.current = 0;
           streamingStartedRef.current = false;
           window.dispatchEvent(new CustomEvent('openmacaw:telemetry', {
@@ -599,8 +653,7 @@ export default function Chat() {
         }
           case 'proposal': {
             console.log('[WS] Received PROPOSAL event:', data);
-            setIsStreaming(false);
-            setStreamingContent('');
+            dispatch({ type: 'END_STREAM' });
             streamingStartedRef.current = false;
 
             const newProposalMsg = {
@@ -611,10 +664,8 @@ export default function Chat() {
               toolCalls: JSON.stringify([{ id: data.id, name: data.tool, arguments: data.input }])
             };
 
-            // IMMUTABLE: always push a new message — never attempt to update a non-existent ID
             queryClient.setQueryData(['session', currentSessionId], (old: any) => {
               if (!old) return old;
-              // Check if this proposal ID already exists to avoid duplicates
               const alreadyExists = (old.messages || []).some((m: any) => m.id === newProposalMsg.id);
               if (alreadyExists) return old;
               return {
@@ -623,7 +674,6 @@ export default function Chat() {
               };
             });
 
-            // Emit to Inspector
             window.dispatchEvent(new CustomEvent('openmacaw:inspector', {
               detail: { type: 'proposal', tool: data.tool, input: data.input, id: data.id }
             }));
@@ -631,9 +681,9 @@ export default function Chat() {
           }
 
           case 'error':
-          setIsStreaming(false);
-          setStreamingContent(prev => prev + `\n[Error: ${data.message}]`);
-          break;
+            console.log('[WS] Received Error Event:', data);
+            dispatch({ type: 'SET_ERROR', code: data.code, message: data.message });
+            break;
 
           case 'session_renamed': {
             const renamed = data as { sessionId: string; newTitle: string };
@@ -655,12 +705,12 @@ export default function Chat() {
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      setIsStreaming(false);
+      dispatch({ type: 'END_STREAM' });
     };
 
     ws.onclose = () => {
       console.log('WebSocket closed');
-      setIsStreaming(false);
+      dispatch({ type: 'END_STREAM' });
     };
 
     wsRef.current = ws;
@@ -679,28 +729,24 @@ export default function Chat() {
     };
   }, [currentSessionId, connectWebSocket]);
 
-  const sendMessage = async () => {
+  const handleSend = useCallback(async () => {
     if (!input.trim() || isStreaming) return;
 
-    const message = input;
+    dispatch({ type: 'CLEAR_ERROR' });
+
+    const msg = input.trim();
     setInput('');
-    setIsStreaming(true);
-    setStreamingContent('');
+    dispatch({ type: 'START_STREAM' });
     streamStartRef.current = Date.now();
 
     try {
       // Auto-create a session if none exists
       let sid = currentSessionId;
       if (!sid) {
-        const res = await apiFetch('/api/sessions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: 'New Conversation' }),
-        });
-        const newSession = await res.json();
+        const newSession = await createSessionMutation.mutateAsync();
         sid = newSession.id;
-        setCurrentSessionId(sid);
-        queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        // Navigation or state update happens in onSuccess of mutateAsync usually, 
+        // but here we need it IMMEDIATELY for the socket join.
       }
 
       // Deterministically wait for the socket to be OPEN — no timeout guesses
@@ -710,17 +756,17 @@ export default function Chat() {
         wsRef.current = ws;
       }
       const openWs = await waitForSocket(ws);
-      openWs.send(JSON.stringify({ type: 'chat', sessionId: sid, message }));
-    } catch (e) {
+      openWs.send(JSON.stringify({ type: 'chat', sessionId: sid, message: msg }));
+    } catch (e: any) {
       console.error('[sendMessage] Failed:', e);
-      setIsStreaming(false);
+      dispatch({ type: 'SET_ERROR', message: e.message || 'Failed to send message' });
     }
-  };
+  }, [input, isStreaming, currentSessionId, queryClient, connectWebSocket]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      handleSend();
     }
   };
 
@@ -728,22 +774,16 @@ export default function Chat() {
   const sendQuickAction = async (prompt: string) => {
     if (isStreaming) return;
 
-    setIsStreaming(true);
-    setStreamingContent('');
+    dispatch({ type: 'CLEAR_ERROR' });
+
+    dispatch({ type: 'START_STREAM' });
     streamStartRef.current = Date.now();
 
     try {
       let sid = currentSessionId;
       if (!sid) {
-        const res = await apiFetch('/api/sessions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: 'New Conversation' }),
-        });
-        const newSession = await res.json();
+        const newSession = await createSessionMutation.mutateAsync();
         sid = newSession.id;
-        setCurrentSessionId(sid);
-        queryClient.invalidateQueries({ queryKey: ['sessions'] });
       }
 
       // Deterministically wait for the socket to be OPEN — no timeout guesses
@@ -754,15 +794,16 @@ export default function Chat() {
       }
       const openWs = await waitForSocket(ws);
       openWs.send(JSON.stringify({ type: 'chat', sessionId: sid, message: prompt }));
-    } catch (e) {
+    } catch (e: any) {
       console.error('[sendQuickAction] Failed:', e);
-      setIsStreaming(false);
+      dispatch({ type: 'SET_ERROR', message: e.message || 'Failed to send prompt' });
     }
   };
 
   const allMessages = (currentSession?.messages || []).map(hydrateMessage);
+  const displayMessages = [...allMessages];
   if (isStreaming) {
-    allMessages.push({
+    displayMessages.push({
       id: 'streaming',
       role: 'assistant',
       content: streamingContent,
@@ -814,7 +855,7 @@ export default function Chat() {
               <span className="font-semibold text-gray-200">{currentSession?.title || 'Chat'}</span>
             </div>
             <div 
-              onClick={() => setShowGuardianOverlay(!showGuardianOverlay)}
+              onClick={() => dispatch({ type: 'TOGGLE_GUARDIAN' })}
               className="flex items-center gap-2 cursor-pointer hover:bg-white/5 px-2 py-1 rounded transition-colors group relative"
             >
               <ShieldCheck className="w-4 h-4 text-cyan-500 group-hover:shadow-[0_0_12px_rgba(6,182,212,0.6)] rounded-full transition-shadow" />
@@ -841,14 +882,26 @@ export default function Chat() {
                     <span className="text-cyan-500">Enabled</span>
                   </div>
                 </div>
-                <div className="mt-3 text-[10px] text-gray-500 leading-tight">
+                <div className="mt-3 text-[10px] text-gray-600 leading-tight">
                   All MCP tool requests require explicit human approval. Destructive actions will trigger critical warnings.
                 </div>
               </div>
             )}
           </div>
         )}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto w-full flex flex-col">
+              {chatError && (
+                <div className="w-full max-w-4xl mx-auto px-4 mt-3">
+                  <div className="flex items-start gap-3 p-3 bg-rose-950/40 border border-rose-500/30 rounded-lg shadow-[0_0_15px_rgba(244,63,94,0.1)]">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <p className="text-sm text-rose-300 flex-1 leading-relaxed">{chatError.message}</p>
+                    <button onClick={() => dispatch({ type: 'CLEAR_ERROR' })} className="text-rose-500/80 hover:text-rose-300 transition-colors">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
           {!currentSessionId ? (
             <div className="flex items-center justify-center h-full text-gray-500 font-mono text-sm">
               Select or create a conversation to start
@@ -895,148 +948,151 @@ export default function Chat() {
               </div>
             </div>
           ) : (
-            allMessages.map((msg, index) => {
-              const isProposal = msg.role === 'assistant' && msg.toolCalls;
-              // Simplified fail-safe: if the message has toolCalls data, always render the card
-              const hasToolCalls = msg.toolCalls && (
-                (typeof msg.toolCalls === 'string' && msg.toolCalls.length > 2) ||
-                (typeof msg.toolCalls === 'object' && Object.keys(msg.toolCalls).length > 0)
-              );
-              const isApprovalCard = msg.role === 'assistant' && hasToolCalls;
-              
-              // Hide raw tool results from the chat feed entirely.
-              // The user sees: [User Prompt] -> [ApprovalCard] -> [LLM Summary]
-              if (msg.role === 'tool' || msg.role === 'system') {
-                return null;
-              }
-
-              if (isApprovalCard) {
-                // ── State machine: use DB status as single source of truth ────────────
-                // Fall back to the fragile heuristic only for messages without a status
-                // field (legacy data that wasn't migrated, or in-flight streaming).
-                const status = msg.status ?? (
-                  allMessages.slice(index + 1).some((m: Message) => m.role === 'tool') ? 'executed' : 'pending'
+            <div className="flex-1 w-full max-w-4xl mx-auto px-4 py-8 space-y-6 flex flex-col">
+              {displayMessages.map((msg, index) => {
+                const isProposal = msg.role === 'assistant' && msg.toolCalls;
+                // Simplified fail-safe: if the message has toolCalls data, always render the card
+                const hasToolCalls = msg.toolCalls && (
+                  (typeof msg.toolCalls === 'string' && msg.toolCalls.length > 2) ||
+                  (typeof msg.toolCalls === 'object' && Object.keys(msg.toolCalls).length > 0)
                 );
-
-                // Denied — show collapsed DeniedCollapsible (no interactive card)
-                if (status === 'denied') {
-                  return (
-                    <div key={msg.id} className="flex justify-center w-full my-6">
-                      <div className="w-full max-w-md">
-                        <DeniedCollapsible reason="" />
-                      </div>
-                    </div>
-                  );
+                const isApprovalCard = msg.role === 'assistant' && hasToolCalls;
+                
+                // Hide raw tool results from the chat feed entirely.
+                // The user sees: [User Prompt] -> [ApprovalCard] -> [LLM Summary]
+                if (msg.role === 'tool' || msg.role === 'system') {
+                  return null;
                 }
 
-                // Executed / Approved — show compact green success card
-                if (status === 'executed' || status === 'approved') {
-                  return (
-                    <div key={msg.id} className="flex justify-center w-full my-6">
-                      <div className="w-full max-w-md">
-                        <div className="mt-3 bg-green-950/20 border border-green-500/20 rounded-md p-3 flex items-center justify-between">
-                          <span className="text-[10px] font-mono text-green-500 uppercase tracking-wider">Executed Successfully</span>
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+                if (isApprovalCard) {
+                  // ── State machine: use DB status as single source of truth ────────────
+                  // Fall back to the fragile heuristic only for messages without a status
+                  // field (legacy data that wasn't migrated, or in-flight streaming).
+                  const status = msg.status ?? (
+                    displayMessages.slice(index + 1).some((m: Message) => m.role === 'tool') ? 'executed' : 'pending'
+                  );
+
+                  // Denied — show collapsed DeniedCollapsible (no interactive card)
+                  if (status === 'denied') {
+                    return (
+                      <div key={msg.id} className="w-full text-center my-6">
+                        <div className="inline-block w-full max-w-md text-left">
+                          <DeniedCollapsible reason="" />
                         </div>
                       </div>
+                    );
+                  }
+
+                  // Executed / Approved — show compact green success card
+                  if (status === 'executed' || status === 'approved') {
+                    return (
+                      <div key={msg.id} className="w-full text-center my-6">
+                        <div className="inline-block w-full max-w-md text-left">
+                          <div className="mt-3 bg-green-950/20 border border-green-500/20 rounded-md p-3 flex items-center justify-between">
+                            <span className="text-[10px] font-mono text-green-500 uppercase tracking-wider">Executed Successfully</span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // Pending (or unknown) — show the full interactive ApprovalCard
+                  return (
+                    <div key={msg.id} className="w-full text-center my-6">
+                      <div className="inline-block w-full max-w-md text-left">
+                        <ApprovalCard
+                          toolCalls={msg.toolCalls!}
+                          sessionId={currentSessionId}
+                          onApprove={() => {
+                            queryClient.invalidateQueries({ queryKey: ['session', currentSessionId] });
+                          }}
+                          onReject={() => {
+                            queryClient.invalidateQueries({ queryKey: ['session', currentSessionId] });
+                          }}
+                        />
+                      </div>
                     </div>
                   );
                 }
 
-                // Pending (or unknown) — show the full interactive ApprovalCard
+                // Note: The double-layer regex intercept now runs at the state level
+                // inside the message_end handler, not here. This prevents flash/vanish
+                // issues from streaming chunk volatility.
+
                 return (
-                  <div key={msg.id} className="flex justify-center w-full my-6">
-                    <div className="w-full max-w-md">
-                      <ApprovalCard
-                        toolCalls={msg.toolCalls!}
-                        sessionId={currentSessionId}
-                        onApprove={() => {
-                          queryClient.invalidateQueries({ queryKey: ['session', currentSessionId] });
-                        }}
-                        onReject={() => {
-                          queryClient.invalidateQueries({ queryKey: ['session', currentSessionId] });
-                        }}
-                      />
+                  <div
+                    key={msg.id}
+                    className="w-full"
+                    style={{ textAlign: msg.role === 'user' ? 'right' : 'left' }}
+                  >
+                    <div
+                      className={`inline-block max-w-[85%] px-3 py-2 rounded-md text-left ${
+                        msg.role === 'user'
+                          ? 'bg-zinc-800 text-gray-200 border border-white/5'
+                          : 'bg-transparent text-gray-300'
+                      }`}
+                    >
+                      {msg.role === 'user' ? (
+                        <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                      ) : (
+                        !msg.toolCalls && (() => {
+                          // Strip any residual JSON tool-call blobs from the displayed content
+                          let cleaned = msg.content || '';
+                          // ── JSON Unwrap ────────────────────────────────────
+                          // Local models in JSON mode often output {"response":"..."}
+                          // instead of plain text. Detect and unwrap single-key wrappers.
+                          try {
+                            const trimmed = cleaned.trim();
+                            if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+                              const parsed = JSON.parse(trimmed);
+                              const keys = Object.keys(parsed);
+                              if (keys.length === 1 && typeof parsed[keys[0]] === 'string') {
+                                const WRAPPER_KEYS = ['response', 'message', 'content', 'text', 'answer', 'reply', 'output', 'result'];
+                                if (WRAPPER_KEYS.includes(keys[0])) {
+                                  cleaned = parsed[keys[0]];
+                                }
+                              }
+                            }
+                          } catch { /* not JSON, use as-is */ }
+                          // Strip residual JSON tool-call blobs from the displayed content
+                          cleaned = cleaned.replace(/\{[\s\S]*?"name"\s*:\s*".*?"[\s\S]*?"arguments"\s*:\s*\{[\s\S]*?\}\s*\}/g, '').trim();
+                          if (!cleaned) return null;
+                          return (
+                            <div className="text-sm prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-code:bg-white/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-cyan-300 prose-code:font-mono prose-code:text-xs prose-pre:bg-black prose-pre:border prose-pre:border-white/10 prose-pre:rounded-md prose-pre:text-gray-300 prose-pre:p-3 prose-a:text-cyan-400 prose-strong:text-white prose-blockquote:border-cyan-500/30 prose-blockquote:text-gray-400">
+                              <ReactMarkdown 
+                                remarkPlugins={[remarkGfm]}
+                                components={{
+                                  code: CodeBlock as any,
+                                }}
+                              >
+                                {cleaned}
+                              </ReactMarkdown>
+                            </div>
+                          );
+                        })()
+                      )}
                     </div>
                   </div>
                 );
-              }
-
-              // Note: The double-layer regex intercept now runs at the state level
-              // inside the message_end handler, not here. This prevents flash/vanish
-              // issues from streaming chunk volatility.
-
-              return (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-2xl px-3 py-2 rounded-md ${
-                      msg.role === 'user'
-                        ? 'bg-zinc-800 text-gray-200 border border-white/5'
-                        : 'bg-transparent text-gray-300'
-                    }`}
-                  >
-                    {msg.role === 'user' ? (
-                      <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-                    ) : (
-                      !msg.toolCalls && (() => {
-                        // Strip any residual JSON tool-call blobs from the displayed content
-                        let cleaned = msg.content || '';
-                        // ── JSON Unwrap ────────────────────────────────────
-                        // Local models in JSON mode often output {"response":"..."}
-                        // instead of plain text. Detect and unwrap single-key wrappers.
-                        try {
-                          const trimmed = cleaned.trim();
-                          if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-                            const parsed = JSON.parse(trimmed);
-                            const keys = Object.keys(parsed);
-                            if (keys.length === 1 && typeof parsed[keys[0]] === 'string') {
-                              const WRAPPER_KEYS = ['response', 'message', 'content', 'text', 'answer', 'reply', 'output', 'result'];
-                              if (WRAPPER_KEYS.includes(keys[0])) {
-                                cleaned = parsed[keys[0]];
-                              }
-                            }
-                          }
-                        } catch { /* not JSON, use as-is */ }
-                        // Strip residual JSON tool-call blobs from the displayed content
-                        cleaned = cleaned.replace(/\{[\s\S]*?"name"\s*:\s*".*?"[\s\S]*?"arguments"\s*:\s*\{[\s\S]*?\}\s*\}/g, '').trim();
-                        if (!cleaned) return null;
-                        return (
-                          <div className="text-sm prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-code:bg-white/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-cyan-300 prose-code:font-mono prose-code:text-xs prose-pre:bg-black prose-pre:border prose-pre:border-white/10 prose-pre:rounded-md prose-pre:text-gray-300 prose-pre:p-3 prose-a:text-cyan-400 prose-strong:text-white prose-blockquote:border-cyan-500/30 prose-blockquote:text-gray-400">
-                            <ReactMarkdown 
-                              remarkPlugins={[remarkGfm]}
-                              components={{
-                                code: CodeBlock as any,
-                              }}
-                            >
-                              {cleaned}
-                            </ReactMarkdown>
-                          </div>
-                        );
-                      })()
-                    )}
-                  </div>
-                </div>
-              );
-            })
+              })}
+              <div ref={messagesEndRef} />
+            </div>
           )}
-          <div ref={messagesEndRef} />
         </div>
 
         <ChatInput
           value={input}
           onChange={(v) => setInput(typeof v === 'function' ? v(input) : v)}
           onSend={() => {
-            sendMessage();
+            handleSend();
           }}
           isStreaming={isStreaming}
           sessionId={currentSessionId}
           onClear={() => {
             queryClient.invalidateQueries({ queryKey: ['session', currentSessionId] });
           }}
-          onSidebarToggle={() => setSidebarVisible(v => !v)}
+          onSidebarToggle={() => dispatch({ type: 'TOGGLE_SIDEBAR' })}
           onNavigate={(path) => navigate(path)}
         />
       </div>

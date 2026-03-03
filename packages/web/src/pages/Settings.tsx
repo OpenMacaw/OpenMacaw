@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Loader2, Bot, Monitor, Shield, Cpu, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Save, Loader2, Bot, Monitor, Shield, Cpu, ToggleLeft, ToggleRight, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '../api';
 
 interface Settings {
@@ -39,6 +39,7 @@ export default function Settings() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
+  const [modelCapability, setModelCapability] = useState<'ok' | 'no_tools' | 'checking' | null>(null);
 
   const { isLoading } = useQuery<Settings>({
     queryKey: ['settings'],
@@ -87,6 +88,38 @@ export default function Settings() {
     }
   };
 
+  // Proactive Model Capability Check
+  useEffect(() => {
+    const model = formData.DEFAULT_MODEL;
+    if (!model) {
+      setModelCapability(null);
+      return;
+    }
+
+    setModelCapability('checking');
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiFetch('/api/check-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model })
+        });
+        const data = await res.json();
+        if (data.supportsTools === true) {
+          setModelCapability('ok');
+        } else if (data.supportsTools === false) {
+          setModelCapability('no_tools');
+        } else {
+          setModelCapability(null);
+        }
+      } catch (e) {
+        setModelCapability(null);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timer);
+  }, [formData.DEFAULT_MODEL]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -106,12 +139,14 @@ export default function Settings() {
           <h1 className="text-2xl font-bold text-white tracking-tight">Settings</h1>
           <p className="text-sm text-gray-500 font-mono mt-1">Configure providers, agent behavior, and preferences.</p>
         </div>
-        <div className="relative flex items-center">
-          {saveStatus === 'saved' && <span className="absolute right-full mr-3 text-green-500 text-sm font-mono whitespace-nowrap animate-pulse">Saved!</span>}
+        <div className="flex items-center gap-4">
+          <div className="h-4 flex items-center justify-end">
+            {saveStatus === 'saved' && <span className="text-green-500 text-xs font-mono animate-pulse">Saved!</span>}
+          </div>
           <button
             onClick={handleSave}
             disabled={saveStatus === 'saving'}
-            className="flex items-center gap-2 px-5 py-2.5 bg-cyan-600 text-white rounded-lg hover:bg-cyan-500 disabled:opacity-50 transition-colors shadow-[0_0_15px_rgba(6,182,212,0.15)]"
+            className="flex items-center gap-2 px-5 py-2.5 bg-cyan-600 text-white rounded-lg hover:bg-cyan-500 disabled:opacity-50 transition-colors shadow-[0_0_15px_rgba(6,182,212,0.15)] min-w-[120px] justify-center"
           >
             {saveStatus === 'saving' ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -187,7 +222,20 @@ export default function Settings() {
             </div>
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-medium text-gray-400">Default Model</label>
+                <div className="flex items-center gap-2">
+                  <label className="block text-xs font-medium text-gray-400">Default Model</label>
+                  {modelCapability === 'checking' && <Loader2 className="w-3 h-3 text-cyan-500 animate-spin" />}
+                  {modelCapability === 'ok' && (
+                    <span className="flex items-center gap-1 text-[9px] font-mono text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded border border-green-500/20">
+                      <CheckCircle2 className="w-3 h-3" /> Tool capable
+                    </span>
+                  )}
+                  {modelCapability === 'no_tools' && (
+                    <span className="flex items-center gap-1 text-[9px] font-mono text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                      <ShieldAlert className="w-3 h-3" /> No tool support
+                    </span>
+                  )}
+                </div>
                 {formData.DEFAULT_PROVIDER === 'ollama' && (
                   <button
                     onClick={fetchOllamaModels}

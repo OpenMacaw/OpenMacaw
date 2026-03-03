@@ -21,6 +21,7 @@ import {
   ollamaRoutes,
   registryRoutes,
   pipelinesRoutes,
+  modelCheckRoutes,
 } from './routes/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -45,6 +46,7 @@ async function buildApp() {
   await fastify.register(ollamaRoutes);
   await fastify.register(registryRoutes);
   await fastify.register(pipelinesRoutes);
+  await fastify.register(modelCheckRoutes);
 
   // Serve built frontend
   const frontendPath = join(__dirname, '../../web/dist');

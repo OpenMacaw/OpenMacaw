@@ -8,3 +8,4 @@ export { executeRoutes } from './execute.js';
 export { ollamaRoutes } from './ollama.js';
 export { registryRoutes } from './registry.js';
 export { pipelinesRoutes } from './pipelines.js';
+export { modelCheckRoutes } from './model-check.js';
