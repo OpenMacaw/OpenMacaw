@@ -29,6 +29,15 @@ export class TelegramPipeline {
       const chatId = String(msg.chat.id);
       if (allowedChatIds.length > 0 && !allowedChatIds.includes(chatId)) return;
 
+      // ── Typing indicator ──────────────────────────────────────────────────
+      // Telegram's "typing" action expires after ~5 s, so fire it immediately
+      // and refresh every 4 s for the full duration of the agent run.
+      const sendTyping = (): void => {
+        this.bot?.sendChatAction(msg.chat.id, 'typing').catch(() => undefined);
+      };
+      sendTyping();
+      const typingInterval = setInterval(sendTyping, 4_000);
+
       const sessionRecoveryFn = async (): Promise<string | null> => {
         try {
           const newSession = createSession({ title: `${this.record.name} Conversation` });
@@ -37,8 +46,18 @@ export class TelegramPipeline {
         } catch { return null; }
       };
 
+      // Each tool call refreshes the typing action immediately so it never
+      // lapses mid-execution.
+      const onToolCallStart = (): void => { sendTyping(); };
+
       try {
-        const response = await runAgentForPipelineAsync(sessionId, msg.text, undefined, sessionRecoveryFn);
+        const response = await runAgentForPipelineAsync(
+          sessionId,
+          msg.text,
+          undefined,
+          sessionRecoveryFn,
+          onToolCallStart,
+        );
         if (response) {
           // Telegram hard limit is 4096 characters per message
           for (const chunk of splitMessage(response, 4000)) {
@@ -49,6 +68,8 @@ export class TelegramPipeline {
         console.error(`[Telegram Pipeline: ${this.record.name}] Error processing message:`, err);
         await this.bot!.sendMessage(msg.chat.id, 'An error occurred while processing your message.')
           .catch(() => undefined);
+      } finally {
+        clearInterval(typingInterval);
       }
     });
 

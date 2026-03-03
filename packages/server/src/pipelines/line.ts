@@ -46,6 +46,27 @@ async function lineReplyAsync(
   }
 }
 
+/**
+ * Show LINE's built-in loading animation in a 1-on-1 DM chat.
+ * Only works when chatId is a userId (not a groupId / roomId).
+ * The animation lasts `loadingSeconds` (5–60) and auto-clears when the bot
+ * sends a reply. Silently ignored on failure (e.g. group chats).
+ */
+async function lineShowLoadingAsync(
+  channelAccessToken: string,
+  chatId: string,
+  loadingSeconds = 20,
+): Promise<void> {
+  await fetch('https://api.line.me/v2/bot/chat/loading/start', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${channelAccessToken}`,
+    },
+    body: JSON.stringify({ chatId, loadingSeconds }),
+  }).catch(() => undefined); // silently ignore — loading animation is best-effort
+}
+
 // ── LinePipeline ──────────────────────────────────────────────────────────────
 
 export class LinePipeline {
@@ -95,7 +116,28 @@ export class LinePipeline {
             return newSession.id;
           } catch { return null; }
         };
-        const response = await runAgentForPipelineAsync(this.record.sessionId, textMsg.text, undefined, sessionRecoveryFn);
+
+        // ── Loading animation (1-on-1 DMs only) ────────────────────────────
+        // LINE's loading animation API requires a userId as chatId.
+        // It is not supported in group or room contexts.
+        const userId = event.source.type === 'user' ? event.source.userId : undefined;
+        if (userId) {
+          await lineShowLoadingAsync(cfg.channelAccessToken, userId);
+        }
+
+        // Refresh the loading animation on each tool call so long-running
+        // agent runs keep showing the indicator throughout.
+        const onToolCallStart = userId
+          ? (): void => { lineShowLoadingAsync(cfg.channelAccessToken, userId); }
+          : undefined;
+
+        const response = await runAgentForPipelineAsync(
+          this.record.sessionId,
+          textMsg.text,
+          undefined,
+          sessionRecoveryFn,
+          onToolCallStart,
+        );
 
         if (response) {
           // LINE allows up to 5 reply messages per replyToken, each max 5000 chars

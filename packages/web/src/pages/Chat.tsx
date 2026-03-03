@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useReducer } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Loader2, ShieldCheck, Shield, Check, Copy, AlertTriangle, X } from 'lucide-react';
+import { Trash2, Loader2, ShieldCheck, Shield, Check, Copy, AlertTriangle, X, Wrench, ChevronDown, ChevronUp } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiFetch, getWsUrl, type AgentEvent } from '../api';
@@ -398,6 +398,98 @@ function hydrateMessage(msg: Message): Message {
 }
 
 
+// ── Tool Call Summary Types & Utilities ──────────────────────────────────────
+
+type ToolCallSummaryItem = {
+  tool: string;
+  server: string;
+  input: Record<string, unknown>;
+};
+
+/**
+ * Scans backwards from `msgIndex` in the full message list to collect every
+ * tool call that was made in the same agent turn as this response. Stops at
+ * the first `user` message it encounters (which marks the turn boundary).
+ */
+function getToolsUsedBeforeMessage(allMsgs: { role: string; toolCalls?: string }[], msgIndex: number): ToolCallSummaryItem[] {
+  const tools: ToolCallSummaryItem[] = [];
+  for (let i = msgIndex - 1; i >= 0; i--) {
+    const m = allMsgs[i];
+    if (m.role === 'user') break;
+    if (m.role === 'assistant' && m.toolCalls) {
+      try {
+        const parsed = JSON.parse(m.toolCalls);
+        const calls: any[] = Array.isArray(parsed) ? parsed : [parsed];
+        for (const call of [...calls].reverse()) {
+          const rawName: string = call.name || '';
+          const tool = rawName.includes('__') ? rawName.split('__')[1] : rawName;
+          const server = rawName.includes('__') ? rawName.split('__')[0] : (call.server || '');
+          tools.unshift({ tool, server, input: call.arguments || {} });
+        }
+      } catch { /* malformed toolCalls JSON — skip */ }
+    }
+  }
+  return tools;
+}
+
+// ── Tools Used Header ─────────────────────────────────────────────────────────
+// Shown at the top of any assistant response that involved tool calls.
+// Collapsed by default; click to expand and inspect each call's input.
+function ToolsUsedHeader({ tools }: { tools: ToolCallSummaryItem[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (tools.length === 0) return null;
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="flex items-center gap-2 px-2.5 py-1.5 bg-zinc-900 border border-white/10 rounded-md hover:border-cyan-500/30 hover:bg-zinc-800 transition-all group w-full text-left"
+      >
+        <Wrench className="w-3 h-3 text-cyan-500/70 shrink-0" />
+        <span className="text-[11px] font-mono text-gray-400 group-hover:text-gray-300 flex-1">
+          {tools.length} tool{tools.length !== 1 ? 's' : ''} used
+        </span>
+        {expanded
+          ? <ChevronUp className="w-3 h-3 text-gray-600" />
+          : <ChevronDown className="w-3 h-3 text-gray-600" />
+        }
+      </button>
+      {expanded && (
+        <div className="mt-1.5 space-y-1.5 pl-1">
+          {tools.map((t, i) => (
+            <div key={i} className="bg-zinc-950 border border-white/5 rounded-md overflow-hidden">
+              <div className="px-2.5 py-1.5 flex items-center gap-2 border-b border-white/5">
+                <span className="text-cyan-400 font-mono text-xs font-medium">{t.tool}</span>
+                {t.server && (
+                  <span className="text-[9px] font-mono text-gray-600 bg-white/5 px-1.5 py-0.5 rounded">{t.server}</span>
+                )}
+              </div>
+              {Object.keys(t.input).length > 0 && (
+                <pre className="px-2.5 py-2 text-[10px] font-mono text-gray-500 overflow-x-auto max-h-40 leading-relaxed">
+                  {JSON.stringify(t.input, null, 2)}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Tool Activity Pill ────────────────────────────────────────────────────────
+// Shown inline while the agent is executing a tool call. Fades in with a subtle
+// pulse so users know the AI is accessing a local capability.
+function ToolActivityPill({ tool, server }: { tool: string; server: string }) {
+  return (
+    <div className="flex items-center gap-2 mt-2 px-3 py-1.5 bg-cyan-950/30 border border-cyan-500/20 rounded-full w-fit text-[11px] font-mono">
+      <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0" />
+      <span className="text-gray-500">{server}</span>
+      <span className="text-gray-700">·</span>
+      <span className="text-cyan-400">{tool}</span>
+    </div>
+  );
+}
+
 // ── Chat State Reducer ────────────────────────────────────────────────────────
 type ChatState = {
   isStreaming: boolean;
@@ -406,6 +498,12 @@ type ChatState = {
   selectedServerId: string | null;
   showGuardianOverlay: boolean;
   sidebarVisible: boolean;
+  /** Set while an MCP tool call is in-flight; null when idle. */
+  activeToolCall: { tool: string; server: string } | null;
+  /** Human-readable label for the current pre-LLM pipeline stage (null when idle). */
+  activeStage: string | null;
+  /** Accumulates all tool calls made during the current streaming turn. */
+  streamingToolCalls: ToolCallSummaryItem[];
 };
 
 type ChatAction =
@@ -417,7 +515,12 @@ type ChatAction =
   | { type: 'SET_SERVER'; id: string | null }
   | { type: 'TOGGLE_GUARDIAN' }
   | { type: 'TOGGLE_SIDEBAR' }
-  | { type: 'CLEAR_ERROR' };
+  | { type: 'CLEAR_ERROR' }
+  | { type: 'SET_TOOL_CALL'; tool: string; server: string }
+  | { type: 'CLEAR_TOOL_CALL' }
+  | { type: 'SET_STAGE'; label: string }
+  | { type: 'CLEAR_STAGE' }
+  | { type: 'ADD_STREAMING_TOOL'; tool: string; server: string; input: Record<string, unknown> };
 
 const initialChatState: ChatState = {
   isStreaming: false,
@@ -426,20 +529,24 @@ const initialChatState: ChatState = {
   selectedServerId: null,
   showGuardianOverlay: false,
   sidebarVisible: true,
+  activeToolCall: null,
+  activeStage: null,
+  streamingToolCalls: [],
 };
 
 function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case 'START_STREAM':
-      return { ...state, isStreaming: true, streamingContent: '', chatError: null };
+      return { ...state, isStreaming: true, streamingContent: '', chatError: null, activeToolCall: null, activeStage: null, streamingToolCalls: [] };
     case 'APPEND_STREAM':
-      return { ...state, streamingContent: state.streamingContent + action.content };
+      // First text delta clears any pre-LLM stage indicator.
+      return { ...state, streamingContent: state.streamingContent + action.content, activeStage: null };
     case 'SET_ERROR':
-      return { ...state, isStreaming: false, chatError: { code: action.code || 'UNKNOWN', message: action.message } };
+      return { ...state, isStreaming: false, activeToolCall: null, activeStage: null, streamingToolCalls: [], chatError: { code: action.code || 'UNKNOWN', message: action.message } };
     case 'END_STREAM':
-      return { ...state, isStreaming: false, streamingContent: '' };
+      return { ...state, isStreaming: false, streamingContent: '', activeToolCall: null, activeStage: null, streamingToolCalls: [] };
     case 'RESET_STREAM':
-      return { ...state, isStreaming: false, streamingContent: '', chatError: null };
+      return { ...state, isStreaming: false, streamingContent: '', chatError: null, activeToolCall: null, activeStage: null, streamingToolCalls: [] };
     case 'SET_SERVER':
       return { ...state, selectedServerId: action.id };
     case 'TOGGLE_GUARDIAN':
@@ -448,6 +555,23 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, sidebarVisible: !state.sidebarVisible };
     case 'CLEAR_ERROR':
       return { ...state, chatError: null };
+    case 'SET_TOOL_CALL':
+      // A real tool call starts — clear the stage indicator (tool pill takes over).
+      return { ...state, activeToolCall: { tool: action.tool, server: action.server }, activeStage: null };
+    case 'CLEAR_TOOL_CALL':
+      return { ...state, activeToolCall: null };
+    case 'ADD_STREAMING_TOOL':
+      return {
+        ...state,
+        streamingToolCalls: [
+          ...state.streamingToolCalls,
+          { tool: action.tool, server: action.server, input: action.input },
+        ],
+      };
+    case 'SET_STAGE':
+      return { ...state, activeStage: action.label };
+    case 'CLEAR_STAGE':
+      return { ...state, activeStage: null };
     default:
       return state;
   }
@@ -467,7 +591,7 @@ export default function Chat() {
   const streamingStartedRef = useRef(false);
   const queryClient = useQueryClient();
 
-  const { isStreaming, streamingContent, chatError, selectedServerId, showGuardianOverlay, sidebarVisible } = state;
+  const { isStreaming, streamingContent, chatError, selectedServerId, showGuardianOverlay, sidebarVisible, activeToolCall, activeStage, streamingToolCalls } = state;
 
 
   const { data: sessions, isLoading: sessionsLoading } = useQuery<Session[]>({
@@ -580,7 +704,7 @@ export default function Chat() {
           }
           dispatch({ type: 'APPEND_STREAM', content: data.content || '' });
           break;
-        case 'tool_call_start':
+        case 'tool_call_start': {
           if (!streamingStartedRef.current) {
             streamingStartedRef.current = true;
             dispatch({ type: 'START_STREAM' });
@@ -588,14 +712,18 @@ export default function Chat() {
           window.dispatchEvent(new CustomEvent('openmacaw:inspector', {
             detail: { type: 'tool_call', tool: data.tool || 'unknown', input: { event: 'Tool call initiated' } }
           }));
-          dispatch({ type: 'APPEND_STREAM', content: `\n[Calling tool: ${data.tool}]` });
+          const rawTool = data.tool || 'unknown';
+          const bareToolName = rawTool.includes('__') ? rawTool.split('__')[1] : rawTool;
+          const toolServer = data.server || '';
+          // Show the animated in-flight pill.
+          dispatch({ type: 'SET_TOOL_CALL', tool: rawTool, server: toolServer });
+          // Accumulate into the per-turn summary that shows after the response.
+          dispatch({ type: 'ADD_STREAMING_TOOL', tool: bareToolName, server: toolServer, input: data.input || {} });
           break;
+        }
         case 'tool_call_result':
-          if (data.outcome === 'denied') {
-            dispatch({ type: 'APPEND_STREAM', content: `\n[Denied: ${data.reason}]` });
-          } else {
-            dispatch({ type: 'APPEND_STREAM', content: `\n[Tool result: ${JSON.stringify(data.result)}]` });
-          }
+          // Clear the activity pill — the agent is back to text generation.
+          dispatch({ type: 'CLEAR_TOOL_CALL' });
           break;
         case 'message_end': {
           const responseTimeMs = streamStartRef.current > 0 ? Date.now() - streamStartRef.current : 0;
@@ -677,6 +805,20 @@ export default function Chat() {
             window.dispatchEvent(new CustomEvent('openmacaw:inspector', {
               detail: { type: 'proposal', tool: data.tool, input: data.input, id: data.id }
             }));
+            break;
+          }
+
+          case 'pipeline_stage': {
+            // Map internal stage IDs to user-facing labels.
+            const stageLabels: Record<string, string> = {
+              fetching_tools: 'Checking available tools…',
+              generating: 'Thinking…',
+            };
+            const label = stageLabels[data.stage] ?? data.stage;
+            if (!streamingStartedRef.current) {
+              // Only show pre-flight stages before text has started streaming.
+              dispatch({ type: 'SET_STAGE', label });
+            }
             break;
           }
 
@@ -802,13 +944,22 @@ export default function Chat() {
 
   const allMessages = (currentSession?.messages || []).map(hydrateMessage);
   const displayMessages = [...allMessages];
-  if (isStreaming) {
+  // Show the streaming placeholder whenever the agent is active — even before
+  // text starts arriving — so the stage / tool pill has somewhere to render.
+  if (isStreaming || activeStage || activeToolCall) {
     displayMessages.push({
       id: 'streaming',
       role: 'assistant',
       content: streamingContent,
     });
   }
+
+  // Derive a human-readable label for the active tool call pill.
+  // Strip the server-id prefix (e.g. "filesystem__read_file" → "read_file").
+  const toolPillTool = activeToolCall
+    ? (activeToolCall.tool.includes('__') ? activeToolCall.tool.split('__')[1] : activeToolCall.tool)
+    : null;
+  const toolPillServer = activeToolCall?.server ?? '';
 
   return (
     <div className="flex h-full">
@@ -1037,6 +1188,17 @@ export default function Chat() {
                         <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                       ) : (
                         !msg.toolCalls && (() => {
+                          // Show the tool activity pill on the in-flight streaming message.
+                          const isStreamingMsg = msg.id === 'streaming';
+
+                          // ── Tools Used Header ──────────────────────────────
+                          // For streaming: use the accumulated streamingToolCalls.
+                          // For loaded history: scan backwards to find tool calls
+                          // that happened in the same agent turn as this response.
+                          const toolsForHeader: ToolCallSummaryItem[] = isStreamingMsg
+                            ? streamingToolCalls
+                            : getToolsUsedBeforeMessage(allMessages, index);
+
                           // Strip any residual JSON tool-call blobs from the displayed content
                           let cleaned = msg.content || '';
                           // ── JSON Unwrap ────────────────────────────────────
@@ -1057,18 +1219,34 @@ export default function Chat() {
                           } catch { /* not JSON, use as-is */ }
                           // Strip residual JSON tool-call blobs from the displayed content
                           cleaned = cleaned.replace(/\{[\s\S]*?"name"\s*:\s*".*?"[\s\S]*?"arguments"\s*:\s*\{[\s\S]*?\}\s*\}/g, '').trim();
-                          if (!cleaned) return null;
+                          if (!cleaned && !(isStreamingMsg && (toolPillTool || activeStage)) && toolsForHeader.length === 0) return null;
                           return (
-                            <div className="text-sm prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-code:bg-white/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-cyan-300 prose-code:font-mono prose-code:text-xs prose-pre:bg-black prose-pre:border prose-pre:border-white/10 prose-pre:rounded-md prose-pre:text-gray-300 prose-pre:p-3 prose-a:text-cyan-400 prose-strong:text-white prose-blockquote:border-cyan-500/30 prose-blockquote:text-gray-400">
-                              <ReactMarkdown 
-                                remarkPlugins={[remarkGfm]}
-                                components={{
-                                  code: CodeBlock as any,
-                                }}
-                              >
-                                {cleaned}
-                              </ReactMarkdown>
-                            </div>
+                            <>
+                              {/* Tools used header — always at the top of the response */}
+                              <ToolsUsedHeader tools={toolsForHeader} />
+
+                              {cleaned ? (
+                                <div className="text-sm prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-code:bg-white/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-cyan-300 prose-code:font-mono prose-code:text-xs prose-pre:bg-black prose-pre:border prose-pre:border-white/10 prose-pre:rounded-md prose-pre:text-gray-300 prose-pre:p-3 prose-a:text-cyan-400 prose-strong:text-white prose-blockquote:border-cyan-500/30 prose-blockquote:text-gray-400">
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                      code: CodeBlock as any,
+                                    }}
+                                  >
+                                    {cleaned}
+                                  </ReactMarkdown>
+                                </div>
+                              ) : null}
+                              {isStreamingMsg && toolPillTool && (
+                                <ToolActivityPill tool={toolPillTool} server={toolPillServer} />
+                              )}
+                              {isStreamingMsg && !toolPillTool && activeStage && (
+                                <div className="flex items-center gap-2 mt-2 px-3 py-1.5 bg-zinc-800/60 border border-white/10 rounded-full w-fit text-[11px] font-mono text-gray-400">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-pulse shrink-0" />
+                                  {activeStage}
+                                </div>
+                              )}
+                            </>
                           );
                         })()
                       )}

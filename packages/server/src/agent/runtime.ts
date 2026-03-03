@@ -144,8 +144,11 @@ export class AgentRuntime {
     }
 
     while (this.stepCount < this.maxSteps) {
+      // Emit a stage event so the UI can show "Checking available tools…" even
+      // when the agent never makes an actual tool call (e.g. "what tools do you have?").
       const tools = getAllTools();
       console.log('[Agent] Available tools:', tools.length);
+      this.eventHandler({ type: 'pipeline_stage', stage: 'fetching_tools' });
 
       const provider = getProviderForModel(this.config.model);
 
@@ -155,6 +158,9 @@ export class AgentRuntime {
 
       const abortController = new AbortController();
       activeStreams.add(abortController);
+
+      // Signal that we are now waiting on the LLM.
+      this.eventHandler({ type: 'pipeline_stage', stage: 'generating' });
 
       try {
         await provider.chat(

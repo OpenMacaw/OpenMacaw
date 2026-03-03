@@ -203,9 +203,20 @@ export class DiscordPipeline {
       }
     };
 
+    // ── Tool activity indicator ───────────────────────────────────────────────
+    // Each time the agent fires a tool call, update the bot's presence so users
+    // can see which capability is being used (e.g. "Using read_file · Filesystem").
+    const onToolCallStart = (tool: string, server: string): void => {
+      sendTyping(); // keep the typing indicator alive during tool execution
+      this.client?.user?.setPresence({
+        activities: [{ name: `Using ${tool} · ${server}`, type: ActivityType.Watching }],
+        status: 'online',
+      });
+    };
+
     let response: string;
     try {
-      response = await runAgentForPipelineAsync(sessionId, content, approvalFn, sessionRecoveryFn);
+      response = await runAgentForPipelineAsync(sessionId, content, approvalFn, sessionRecoveryFn, onToolCallStart);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[Discord Pipeline: ${pipelineName}] Agent error:`, errMsg);

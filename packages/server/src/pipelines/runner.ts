@@ -21,12 +21,16 @@ export type SessionRecoveryFn = () => Promise<string | null>;
  * @param sessionRecoveryFn Optional callback invoked when the session is missing.
  *                          Should return a fresh session ID so the conversation
  *                          can continue, or null to abort.
+ * @param onToolCallStart   Optional callback fired each time the agent starts a
+ *                          tool call. Receives the tool name and server ID so the
+ *                          pipeline adapter can update its activity indicator.
  */
 export async function runAgentForPipelineAsync(
   sessionId: string,
   userMessage: string,
   approvalFn?: ApprovalFn,
   sessionRecoveryFn?: SessionRecoveryFn,
+  onToolCallStart?: (tool: string, server: string) => void,
 ): Promise<string> {
   let resolvedSessionId = sessionId;
   let session = getSession(resolvedSessionId);
@@ -55,6 +59,8 @@ export async function runAgentForPipelineAsync(
   const eventHandler = (event: AgentEvent): void => {
     if (event.type === 'text_delta') {
       textParts.push(event.content);
+    } else if (event.type === 'tool_call_start' && onToolCallStart) {
+      onToolCallStart(event.tool, event.server);
     }
   };
 
