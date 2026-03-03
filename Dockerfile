@@ -20,11 +20,11 @@ RUN npm run build
 FROM base AS production
 WORKDIR /app
 
-RUN npm install --only=production
+COPY package*.json ./
+RUN npm install --omit=dev
 
 COPY --from=builder /app/packages/server/dist packages/server/dist
 COPY --from=builder /app/packages/web/dist packages/web/dist
-COPY package*.json ./
 
 ENV NODE_ENV=production
 ENV PORT=3000
