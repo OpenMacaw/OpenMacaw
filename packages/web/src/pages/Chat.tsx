@@ -1237,6 +1237,10 @@ export default function Chat() {
       console.log('WebSocket connected');
       if (currentSessionId) {
         ws.send(JSON.stringify({ type: 'join', sessionId: currentSessionId }));
+        // Invalidate the session cache on every (re)connect so that any messages
+        // persisted while the socket was disconnected (e.g. message_end lost in
+        // transit) are fetched immediately without waiting for the next user action.
+        queryClient.invalidateQueries({ queryKey: ['session', currentSessionId] });
       }
     };
 

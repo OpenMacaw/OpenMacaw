@@ -80,6 +80,15 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           const abortCtrl = new AbortController();
           sessionAbortControllers.set(sessionId, abortCtrl);
 
+          // Always route through the registry so that if the client reconnects mid-run
+          // and re-registers a new socket via 'join', subsequent events reach the new socket.
+          const liveEventHandler = (event: AgentEvent) => {
+            const handler = socketRegistry.get(sessionId);
+            if (handler) {
+              handler(event);
+            }
+          };
+
           try {
             await createAgentRuntime(
               {
@@ -90,7 +99,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
                 maxSteps: config.MAX_STEPS,
                 signal: abortCtrl.signal,
               },
-              sendEvent
+              liveEventHandler
             ).run(userMessage);
           } finally {
             // Always clean up — whether run completed, errored, or was aborted
