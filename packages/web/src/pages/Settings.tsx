@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Loader2, Bot, Monitor, Shield, Cpu, ToggleLeft, ToggleRight, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { Save, Loader2, Bot, Monitor, Shield, Cpu, ToggleLeft, ToggleRight, ShieldAlert, CheckCircle2, Bell, BellOff, Smartphone, Download } from 'lucide-react';
 import { apiFetch } from '../api';
+import {
+  notificationsSupported,
+  notificationPermission,
+  requestNotificationPermissionAsync,
+  notifyAsync,
+} from '../lib/notifications';
 
 interface Settings {
   ANTHROPIC_API_KEY?: string;
@@ -40,6 +46,64 @@ export default function Settings() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [modelCapability, setModelCapability] = useState<'ok' | 'no_tools' | 'checking' | null>(null);
+
+  // ── PWA / Notifications state ─────────────────────────────────────────────
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() =>
+    notificationsSupported() ? notificationPermission() : 'denied'
+  );
+  const [requestingPerm, setRequestingPerm] = useState(false);
+  const [pwaInstallable, setPwaInstallable] = useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    // Android Chrome fires beforeinstallprompt when the PWA is installable.
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+      setPwaInstallable(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+
+    // Already installed — running in standalone mode.
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setPwaInstallable(false);
+    }
+
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    const { outcome } = await deferredInstallPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setPwaInstallable(false);
+      setDeferredInstallPrompt(null);
+    }
+  };
+
+  const handleRequestNotifications = async () => {
+    setRequestingPerm(true);
+    const result = await requestNotificationPermissionAsync();
+    setNotifPerm(result);
+    setRequestingPerm(false);
+  };
+
+  const handleTestNotification = () => {
+    notifyAsync({
+      title: 'Test notification',
+      body: 'OpenMacaw notifications are working.',
+      tag: 'openmacaw-test',
+      url: '/settings',
+    }).catch(() => { /* ignore */ });
+    // Always fire — even when visible — so the user can confirm it works.
+    if (notificationPermission() === 'granted') {
+      new Notification('Test notification', {
+        body: 'OpenMacaw notifications are working.',
+        icon: '/icons/icon-192.svg',
+      });
+    }
+  };
 
   const { isLoading } = useQuery<Settings>({
     queryKey: ['settings'],
@@ -345,6 +409,88 @@ export default function Settings() {
                 onChange={(e) => setFormData({ ...formData, MAX_DENIAL_RETRIES: e.target.value })}
                 className={inputClass}
               />
+            </div>
+          </div>
+        </div>
+
+        {/* ── App & Notifications (PWA) ──────────────────── */}
+        <div className={cardClass}>
+          <div className="flex items-center gap-2 mb-5">
+            <Smartphone className="w-4 h-4 text-cyan-500" />
+            <h2 className="text-sm font-bold text-white uppercase tracking-wider">App &amp; Notifications</h2>
+          </div>
+
+          <div className="space-y-5">
+            {/* Install to home screen */}
+            <div>
+              <p className="text-xs font-medium text-gray-400 mb-2">Install as App</p>
+              {window.matchMedia('(display-mode: standalone)').matches ? (
+                <div className="flex items-center gap-2 px-3 py-2 bg-cyan-950/30 border border-cyan-500/20 rounded-lg">
+                  <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <span className="text-xs text-cyan-300">Running as installed app</span>
+                </div>
+              ) : pwaInstallable ? (
+                <button
+                  onClick={handleInstallPwa}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-sm font-medium transition-colors shadow-[0_0_15px_rgba(6,182,212,0.15)]"
+                >
+                  <Download className="w-4 h-4" />
+                  Add to Home Screen
+                </button>
+              ) : (
+                <p className="text-xs text-gray-500 font-mono">
+                  Open this page in Chrome on Android and tap the browser menu &rarr; "Add to Home screen".
+                </p>
+              )}
+            </div>
+
+            {/* Notification permission */}
+            <div className="border-t border-white/5 pt-4">
+              <p className="text-xs font-medium text-gray-400 mb-3">Push Notifications</p>
+
+              {!notificationsSupported() ? (
+                <div className="flex items-center gap-2 px-3 py-2 bg-zinc-800 border border-white/5 rounded-lg">
+                  <BellOff className="w-4 h-4 text-gray-500 shrink-0" />
+                  <span className="text-xs text-gray-500">Not supported in this browser</span>
+                </div>
+              ) : notifPerm === 'granted' ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-green-950/30 border border-green-500/20 rounded-lg">
+                    <Bell className="w-4 h-4 text-green-400 shrink-0" />
+                    <span className="text-xs text-green-300">Notifications enabled</span>
+                  </div>
+                  <button
+                    onClick={handleTestNotification}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-zinc-800 border border-white/10 hover:bg-zinc-700 text-gray-300 rounded-lg text-xs font-mono transition-colors"
+                  >
+                    Send test notification
+                  </button>
+                </div>
+              ) : notifPerm === 'denied' ? (
+                <div className="flex items-start gap-2 px-3 py-2 bg-rose-950/20 border border-rose-500/20 rounded-lg">
+                  <BellOff className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-rose-300">
+                    Blocked in browser settings. Reset site permissions and reload to re-enable.
+                  </p>
+                </div>
+              ) : (
+                <button
+                  onClick={handleRequestNotifications}
+                  disabled={requestingPerm}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-zinc-800 border border-white/10 hover:bg-zinc-700 disabled:opacity-50 text-gray-200 rounded-lg text-sm font-medium transition-colors"
+                >
+                  {requestingPerm ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Bell className="w-4 h-4" />
+                  )}
+                  Enable Notifications
+                </button>
+              )}
+
+              <p className="mt-2 text-[10px] text-gray-600 font-mono leading-relaxed">
+                Notifies you when the agent finishes or a tool call is blocked — only while the app is in the background.
+              </p>
             </div>
           </div>
         </div>

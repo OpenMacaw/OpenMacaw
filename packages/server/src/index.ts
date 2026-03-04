@@ -58,18 +58,20 @@ async function buildApp() {
   if (existsSync(frontendPath)) {
     console.log(`Serving frontend from: ${frontendPath}`);
 
-    // Serve hashed assets (/assets/*) — these have content-hash filenames and never conflict with SPA routes
-    const assetsPath = join(frontendPath, 'assets');
-    if (existsSync(assetsPath)) {
-      await fastify.register(fastifyStatic, {
-        root: assetsPath,
-        prefix: '/assets/',
-        decorateReply: false,
-      });
-    }
+    // Serve ALL static files from dist/ — icons, sw.js, workbox, manifest, assets, etc.
+    // wildcard: false means it only intercepts paths that map to a real file; anything
+    // else falls through to the SPA catch-all below.
+    await fastify.register(fastifyStatic, {
+      root: frontendPath,
+      prefix: '/',
+      decorateReply: true,
+      wildcard: false,
+      serve: true,
+      index: false, // don't auto-serve index.html here — SPA handler does it
+    });
 
-    // SPA catch-all — serves index.html for every non-API route so deep links and refreshes work.
-    // Reads from disk each time so a frontend rebuild is picked up without restarting the server.
+    // SPA catch-all — serves index.html for every non-API, non-asset route so that
+    // deep links and page refreshes work correctly.
     fastify.get('/*', async (_request, reply) => {
       if (existsSync(indexPath)) {
         const indexHtml = readFileSync(indexPath, 'utf-8');

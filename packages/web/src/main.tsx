@@ -12,6 +12,33 @@ import Pipelines from './pages/Pipelines';
 import Catalog from './pages/Catalog';
 import './index.css';
 
+// ── Service Worker (PWA) ──────────────────────────────────────────────────────
+// vite-plugin-pwa generates sw.js at the root. We register it here so the app
+// is installable on Android and can show background notifications.
+if ('serviceWorker' in navigator) {
+  // Use the virtual module injected by vite-plugin-pwa at build time.
+  // In dev mode this is a no-op; in production it registers the Workbox SW.
+  import('virtual:pwa-register').then(({ registerSW }) => {
+    registerSW({
+      // Silently update — no reload prompt needed for this app.
+      onNeedRefresh() { /* no-op */ },
+      onOfflineReady() {
+        console.info('[PWA] App is ready for offline use.');
+      },
+    });
+
+    // Forward service-worker click events (notification tap → navigate)
+    navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+      const data = event.data as { type?: string; url?: string } | undefined;
+      if (data?.type === 'NOTIFICATION_CLICK' && data.url) {
+        window.location.href = data.url;
+      }
+    });
+  }).catch(() => {
+    // Module not available in dev / non-PWA build — ignore.
+  });
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

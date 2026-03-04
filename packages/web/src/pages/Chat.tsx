@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiFetch, getWsUrl, type AgentEvent } from '../api';
 import { ChatInput } from '../components/ChatInput';
+import { notifyAgentDoneAsync, notifyToolDeniedAsync } from '../lib/notifications';
 
 // ── Copy Button for Code Blocks ───────────────────────────────────────────────
 function CodeBlock({ children, className, ...props }: any) {
@@ -690,6 +691,8 @@ function ApprovalCard({ toolCalls, sessionId, onApprove, onReject }: { toolCalls
     } catch (e) {
       console.error('[Deny] Error:', e);
     }
+    // Notify if the app is running in the background when the denial fires.
+    notifyToolDeniedAsync(toolName, reason.trim() || undefined).catch(() => { /* best-effort */ });
     onReject();
   };
 
@@ -1277,6 +1280,8 @@ export default function Chat() {
             }
           }));
           queryClient.invalidateQueries({ queryKey: ['session', currentSessionId] });
+          // Notify the user if the app is backgrounded / screen is off.
+          notifyAgentDoneAsync().catch(() => { /* swallow — notifications are best-effort */ });
           break;
         }
         case 'proposal': {
