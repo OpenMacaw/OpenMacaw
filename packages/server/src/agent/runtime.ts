@@ -169,6 +169,7 @@ export class AgentRuntime {
       let deltaText = '';
       let interceptedProposal = false;
       let currentTurnHadToolCall = false;
+      let pendingUsage: { inputTokens: number; outputTokens: number } | null = null;
 
       const abortController = new AbortController();
       activeStreams.add(abortController);
@@ -200,17 +201,11 @@ export class AgentRuntime {
             } else if ((delta as any).type === 'clear_text') {
               deltaText = '';
             } else if (delta.type === 'message_end' && delta.usage) {
-              this.eventHandler({ type: 'message_end', usage: delta.usage });
-              // Only save text if there was NO tool call this turn.
-              // When there IS a tool call, handleToolCall already saves the proposal
-              // as the single assistant message for this turn. Saving a second
-              // assistant message would create an invalid consecutive-assistant
-              // sequence that the Anthropic API rejects.
-              if (deltaText && !currentTurnHadToolCall) {
-                await this.saveMessage('assistant', deltaText, delta.usage);
-                this.messages.push({ role: 'assistant', content: deltaText });
-              }
-            } else if (delta.type === 'error') {
+               // Defer message_end emission and DB save until AFTER the hallucination
+               // check below. Emitting here would signal "done" to the client before
+               // we know whether to reject this response and retry.
+               pendingUsage = delta.usage;
+             } else if (delta.type === 'error') {
               this.eventHandler({ type: 'error', message: delta.error || 'Unknown error' });
             }
           },
@@ -241,15 +236,18 @@ export class AgentRuntime {
       }
 
       // ── Task 2: Hallucination Retry Loop ─────────────────────────────────
-      // If the model returned text that *looks* like it completed an action
-      // ("Here are the files...", "I have listed...") but fired ZERO actual
-      // tool calls, the response is hallucinated. REJECT it and force a retry.
-      if (deltaText && !currentTurnHadToolCall && looksLikeHallucinatedAction(deltaText)) {
+      // Ollama/local models don't support native tool_use blocks — they emit
+      // tool calls as plain JSON text. This means they can "roleplay" actions
+      // by describing results in prose. Detect and reject that here.
+      // Cloud providers (Anthropic, OpenAI) use proper tool_use API blocks and
+      // will never produce this pattern — skip the check for them to avoid
+      // false-positives on legitimate final summaries.
+      if (provider.name === 'ollama' && deltaText && !currentTurnHadToolCall && looksLikeHallucinatedAction(deltaText)) {
         console.warn('[Agent] HALLUCINATION DETECTED: Model simulated action without tool call. Rejecting response and retrying.');
         console.warn('[Agent] Rejected text (first 200 chars):', deltaText.substring(0, 200));
 
-        // Do NOT save this message to the DB — discard it entirely
-        // Remove it from the in-memory message list if it was added
+        // Message was not yet saved to DB (save is deferred to after this check).
+        // Remove it from the in-memory message list if it was accidentally added.
         this.messages = this.messages.filter(m => m.content !== deltaText);
 
         // Inject a corrective system message to steer the model back
@@ -261,10 +259,27 @@ export class AgentRuntime {
         // Emit a system event so the frontend shows this (optional, for debugging)
         this.eventHandler({ type: 'text_delta', content: '\n⚠️ Hallucination detected — forcing retry...' });
 
-        // Reset delta for next iteration
+        // Reset delta and usage for next iteration
         deltaText = '';
+        pendingUsage = null;
         // Continue the loop (do NOT break — we want the model to try again)
         continue;
+      }
+
+      // Emit message_end and save the assistant message now that we know the
+      // response is legitimate (not a hallucinated action).
+      if (pendingUsage) {
+        this.eventHandler({ type: 'message_end', usage: pendingUsage });
+        // Only save text if there was NO tool call this turn.
+        // When there IS a tool call, handleToolCall already saves the proposal
+        // as the single assistant message for this turn. Saving a second
+        // assistant message would create an invalid consecutive-assistant
+        // sequence that the Anthropic API rejects.
+        if (deltaText && !currentTurnHadToolCall) {
+          await this.saveMessage('assistant', deltaText, pendingUsage);
+          this.messages.push({ role: 'assistant', content: deltaText });
+        }
+        pendingUsage = null;
       }
 
       if (!deltaText && this.stepCount >= this.maxSteps) {
