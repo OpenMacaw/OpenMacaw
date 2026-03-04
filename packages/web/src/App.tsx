@@ -4,11 +4,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   MessageSquare, Server, Activity, Settings, Shield,
   ChevronLeft, ChevronRight, Bot, Plus, X, Save, Loader2, Menu, Moon, Sun,
-  ShieldCheck, Settings2, AlertOctagon, Copy, ChevronDown, ChevronUp, Cpu, Clock, Hash, Workflow, BookMarked, Trash2
+  ShieldCheck, Settings2, AlertOctagon, Copy, ChevronDown, ChevronUp, Cpu, Clock, Hash, Workflow, BookMarked, Trash2, LogOut, User as UserIcon
 } from 'lucide-react';
 import { apiFetch } from './api';
 import { ServerPermissionDrawer } from './components/ServerPermissionDrawer';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useAuth } from './contexts/AuthContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -265,6 +266,8 @@ function App() {
   const inspectorRef = useRef<HTMLDivElement>(null);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
   const [isGlobalStreaming, setIsGlobalStreaming] = useState(false);
+  const { user, logout } = useAuth();
+  const [profileOpen, setProfileOpen] = useState(false);
 
   // Inspector state
   const [sessionInfo, setSessionInfo] = useState<{ model: string; sessionId: string } | null>(null);
@@ -573,6 +576,45 @@ function App() {
                 <span className="font-medium text-left">New Chat</span>
               </button>
             )}
+            
+            {/* User Profile / Logout */}
+            <div className="pt-2 mt-2 border-t border-white/5 relative">
+              <button 
+                onClick={() => setProfileOpen(!profileOpen)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/5 transition-colors group"
+              >
+                <div className="w-6 h-6 rounded bg-cyan-950/50 border border-cyan-500/20 flex items-center justify-center shrink-0 group-hover:bg-cyan-900/50 transition-colors">
+                  <span className="text-xs font-mono font-bold text-cyan-500 uppercase">
+                    {user?.name?.charAt(0) || 'U'}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0 text-left">
+                  <p className="text-xs font-medium text-gray-200 truncate">{user?.name || 'User'}</p>
+                  <p className="text-[9px] font-mono text-gray-500 truncate">{user?.role || 'admin'}</p>
+                </div>
+                {profileOpen ? <ChevronUp className="w-3 h-3 text-gray-500" /> : <ChevronDown className="w-3 h-3 text-gray-500" />}
+              </button>
+
+              {/* Dropdown Menu */}
+              {profileOpen && (
+                <div className="absolute bottom-full left-0 w-full mb-1 bg-zinc-900 border border-white/10 rounded-lg shadow-xl overflow-hidden shadow-[0_-5px_20px_rgba(0,0,0,0.5)] z-50 animate-in slide-in-from-bottom-2 duration-150">
+                  <div className="px-3 py-2 border-b border-white/5">
+                    <p className="text-xs font-medium text-white truncate">{user?.email}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      logout();
+                      setProfileOpen(false);
+                      setMobileNavOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-400 hover:bg-rose-950/30 hover:text-rose-300 transition-colors"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    Log Out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </aside>
 

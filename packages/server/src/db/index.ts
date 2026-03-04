@@ -5,6 +5,7 @@ import { dirname } from 'path';
 // ── Table name mapping (schema export keys → SQL table names) ─────────────────
 
 const TABLE_SQL: Record<string, string> = {
+  users: 'users',
   servers: 'servers',
   permissions: 'permissions',
   sessions: 'sessions',
@@ -17,6 +18,7 @@ const TABLE_SQL: Record<string, string> = {
 
 // Primary key column (snake_case) per SQL table name
 const TABLE_PK: Record<string, string> = {
+  users: 'id',
   servers: 'id',
   permissions: 'id',
   sessions: 'id',
@@ -79,6 +81,15 @@ export function getDrizzleDb(): BetterSQLite3Database<typeof schemaMappings> {
 // ── Schema DDL ────────────────────────────────────────────────────────────────
 
 const SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user',
+    created_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS servers (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -119,6 +130,7 @@ const SCHEMA_SQL = `
 
   CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     model TEXT NOT NULL,
     system_prompt TEXT,
@@ -268,6 +280,20 @@ export function initDatabase(): void {
     // Column already exists, safe to ignore
   }
 
+  // ── Phase 57: Multi-Tenant Data Migration ────────────────────────────────
+  try {
+    sqlite.exec("ALTER TABLE sessions ADD COLUMN user_id TEXT REFERENCES users(id) ON DELETE CASCADE");
+    
+    // Assign orphaned sessions to the first available admin user
+    const firstAdmin = sqlite.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").get() as { id: string } | undefined;
+    if (firstAdmin?.id) {
+      sqlite.prepare("UPDATE sessions SET user_id = ? WHERE user_id IS NULL").run(firstAdmin.id);
+      console.log(`[DB Migration] Assigned orphaned sessions to admin user ${firstAdmin.id}`);
+    } else {
+      console.warn('[DB Migration] No admin user found to assign orphaned sessions to.');
+    }
+  } catch (e) { /* column already exists */ }
+
   // ── Trust Policy columns (Phase 46) ──────────────────────────────────────
   try {
     sqlite.exec("ALTER TABLE permissions ADD COLUMN auto_approve_reads INTEGER DEFAULT 0");
@@ -399,6 +425,7 @@ export function getDb() {
 // ── Schema export (unchanged — callers pass these as table keys) ──────────────
 
 export const schema = {
+  users: 'users',
   servers: 'servers',
   permissions: 'permissions',
   sessions: 'sessions',

@@ -1,5 +1,14 @@
 import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  role: text('role').notNull().default('user'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
 export const servers = sqliteTable('servers', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -48,6 +57,7 @@ export const permissions = sqliteTable('permissions', {
 
 export const sessions = sqliteTable('sessions', {
   id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   model: text('model').notNull(),
   systemPrompt: text('system_prompt'),
@@ -110,3 +120,5 @@ export type Message = typeof messages.$inferSelect;
 export type ActivityLogEntry = typeof activityLog.$inferSelect;
 export type PipelineLogEntry = typeof pipelineLog.$inferSelect;
 export type Setting = typeof settings.$inferSelect;
+export type User = typeof users.$inferSelect;
+

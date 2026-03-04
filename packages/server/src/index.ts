@@ -2,11 +2,14 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
+import fastifyJwt from '@fastify/jwt';
 import { existsSync, readFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { getDrizzleDb, initDatabase } from './db/index.js';
 import { loadConfig } from './config.js';
-import { initDatabase } from './db/index.js';
+import * as schema from './db/schema.js';
+import { eq } from 'drizzle-orm';
 import { restoreConnections, migrateServerArguments } from './mcp/index.js';
 import { restorePipelinesAsync } from './pipelines/index.js';
 import { ensureDefaultSession } from './agent/index.js';
@@ -23,6 +26,7 @@ import {
   pipelinesRoutes,
   modelCheckRoutes,
   agenticRoutes,
+  authRoutes,
 } from './routes/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,6 +39,25 @@ async function buildApp() {
 
   await fastify.register(cors, { origin: true, credentials: true });
   await fastify.register(fastifyWebsocket);
+  await fastify.register(fastifyJwt, {
+    secret: process.env.JWT_SECRET || 'super-secret-openmacaw-key-change-me'
+  });
+
+  // Global Auth Middleware
+  fastify.addHook('onRequest', async (request, reply) => {
+    const url = request.url;
+    // Bypass websockets and public auth routes (setup, login, status)
+    if (url.startsWith('/ws') || url.startsWith('/api/auth')) return;
+    
+    // Protect all other /api/ routes
+    if (url.startsWith('/api/')) {
+      try {
+        await request.jwtVerify();
+      } catch (err) {
+        return reply.code(401).send({ error: 'Unauthorized. Please log in.' });
+      }
+    }
+  });
 
   // API routes first
   await fastify.register(serversRoutes);
@@ -49,6 +72,7 @@ async function buildApp() {
   await fastify.register(pipelinesRoutes);
   await fastify.register(modelCheckRoutes);
   await fastify.register(agenticRoutes);
+  await fastify.register(authRoutes);
 
   // Serve built frontend
   const frontendPath = join(__dirname, '../../web/dist');
@@ -95,13 +119,17 @@ async function start() {
     console.log('Database initialized');
 
     // Ensure there is always at least one session so the chat UI works out of the box
-    ensureDefaultSession();
+    const db = getDrizzleDb();
+    const existingUsers = await db.select().from(schema.users).where(eq(schema.users.role, 'admin')).limit(1);
+    const firstAdmin = existingUsers[0];
+    if (firstAdmin?.id) {
+      ensureDefaultSession(firstAdmin.id);
+    }
 
-    const config = loadConfig();
     const app = await buildApp();
 
-    await app.listen({ port: config.PORT, host: '0.0.0.0' });
-    console.log(`\nOpenMacaw running at http://localhost:${config.PORT}\n`);
+    await app.listen({ port: parseInt(process.env.PORT || '3000'), host: '0.0.0.0' });
+    console.log(`\nOpenMacaw running at http://0.0.0.0:${process.env.PORT || '3000'}\n`);
 
     // Async trigger MCP auto-reconnection in the background 
     // without blocking the main Fastify loop

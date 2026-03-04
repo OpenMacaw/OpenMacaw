@@ -10,6 +10,8 @@ import AuditLog from './pages/AuditLog';
 import Settings from './pages/Settings';
 import Pipelines from './pages/Pipelines';
 import Catalog from './pages/Catalog';
+import Auth from './pages/Auth';
+import { AuthProvider, ProtectedRoute } from './contexts/AuthContext';
 import './index.css';
 
 // ── Service Worker (PWA) ──────────────────────────────────────────────────────
@@ -51,20 +53,23 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={queryClient}>
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<App />}>
-          <Route index element={<Navigate to="/chat" replace />} />
-          <Route path="chat" element={<Chat />}>
-            <Route path=":id" element={<Chat />} />
+      <AuthProvider>
+        <Routes>
+          <Route path="/auth" element={<Auth />} />
+          <Route path="/" element={<ProtectedRoute><App /></ProtectedRoute>}>
+            <Route index element={<Navigate to="/chat" replace />} />
+            <Route path="chat" element={<Chat />}>
+              <Route path=":id" element={<Chat />} />
+            </Route>
+            <Route path="servers" element={<Servers />} />
+            <Route path="permissions/:serverId" element={<Permissions />} />
+            <Route path="pipelines" element={<Pipelines />} />
+            <Route path="activity" element={<AuditLog />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="catalog" element={<Catalog />} />
           </Route>
-          <Route path="servers" element={<Servers />} />
-          <Route path="permissions/:serverId" element={<Permissions />} />
-          <Route path="pipelines" element={<Pipelines />} />
-          <Route path="activity" element={<AuditLog />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="catalog" element={<Catalog />} />
-        </Route>
-      </Routes>
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   </QueryClientProvider>
 );

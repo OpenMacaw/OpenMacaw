@@ -4,6 +4,7 @@ import { getActiveSettings } from '../config.js';
 
 export interface SessionData {
   id: string;
+  userId: string;
   title: string;
   model: string;
   /** Operator-supplied personality/style text appended to the base system prompt. */
@@ -14,6 +15,7 @@ export interface SessionData {
 }
 
 export function createSession(data: {
+  userId?: string;
   title?: string;
   model?: string;
   /** Personality override for this session. Appended to base system prompt, not replacing it. */
@@ -25,9 +27,16 @@ export function createSession(data: {
   const id = nanoid();
   const config = getActiveSettings();
 
+  let resolvedUserId: string = data.userId || '';
+  if (!resolvedUserId) {
+    const admin = db.select(schema.users as any).where((col: (k: string) => any) => col('role') === 'admin').all() as any[];
+    resolvedUserId = admin.length > 0 ? admin[0].id : '';
+  }
+
   // Store personality in the system_prompt DB column (reusing existing schema).
   const dbSession = {
     id,
+    userId: resolvedUserId,
     title: data.title || 'New Conversation',
     model: data.model || config.DEFAULT_MODEL,
     systemPrompt: data.personality ?? config.PERSONALITY,
@@ -40,6 +49,7 @@ export function createSession(data: {
 
   return {
     id: dbSession.id,
+    userId: dbSession.userId,
     title: dbSession.title,
     model: dbSession.model,
     personality: dbSession.systemPrompt || undefined,
@@ -49,15 +59,21 @@ export function createSession(data: {
   };
 }
 
-export function getSession(id: string): SessionData | null {
+export function getSession(id: string, userId?: string): SessionData | null {
   const db = getDb();
-  const sessions = db.select(schema.sessions as any).where((getCol: (col: string) => any) => getCol('id') === id).all() as any[];
+  let sessions;
+  if (userId) {
+    sessions = db.select(schema.sessions as any).where((getCol: (col: string) => any) => getCol('id') === id && getCol('userId') === userId).all() as any[];
+  } else {
+    sessions = db.select(schema.sessions as any).where((getCol: (col: string) => any) => getCol('id') === id).all() as any[];
+  }
 
   if (sessions.length === 0) return null;
 
   const session = sessions[0];
   return {
     id: session.id,
+    userId: session.userId,
     title: session.title,
     model: session.model,
     personality: session.systemPrompt || undefined,
@@ -67,12 +83,13 @@ export function getSession(id: string): SessionData | null {
   };
 }
 
-export function listSessions(): SessionData[] {
+export function listSessions(userId: string): SessionData[] {
   const db = getDb();
-  const sessions = db.select(schema.sessions as any).where().all() as any[];
+  const sessions = db.select(schema.sessions as any).where((getCol: (col: string) => any) => getCol('userId') === userId).all() as any[];
 
   return sessions.map(session => ({
     id: session.id,
+    userId: session.userId,
     title: session.title,
     model: session.model,
     personality: session.systemPrompt || undefined,
@@ -82,7 +99,7 @@ export function listSessions(): SessionData[] {
   }));
 }
 
-export function updateSession(id: string, updates: Partial<{
+export function updateSession(id: string, userId: string | undefined, updates: Partial<{
   title: string;
   model: string;
   /** Personality text to store for this session. Appended to base system prompt at runtime. */
@@ -98,25 +115,33 @@ export function updateSession(id: string, updates: Partial<{
   if (updates.personality !== undefined) dbUpdates.systemPrompt = updates.personality;
   if (updates.mode !== undefined) dbUpdates.mode = updates.mode;
 
-  db.update(schema.sessions as any).set(dbUpdates).where((getCol: (col: string) => any) => getCol('id') === id);
+  if (userId) {
+    db.update(schema.sessions as any).set(dbUpdates).where((getCol: (col: string) => any) => getCol('id') === id && getCol('userId') === userId);
+  } else {
+    db.update(schema.sessions as any).set(dbUpdates).where((getCol: (col: string) => any) => getCol('id') === id);
+  }
 
-  return getSession(id);
+  return getSession(id, userId);
 }
 
-export function deleteSession(id: string): void {
+export function deleteSession(id: string, userId?: string): void {
   const db = getDb();
-  db.delete(schema.sessions as any).where((getCol: (col: string) => any) => getCol('id') === id);
+  if (userId) {
+    db.delete(schema.sessions as any).where((getCol: (col: string) => any) => getCol('id') === id && getCol('userId') === userId);
+  } else {
+    db.delete(schema.sessions as any).where((getCol: (col: string) => any) => getCol('id') === id);
+  }
 }
 
 /**
  * Ensures at least one session exists in the database.
  * Called at server startup so the web UI always has a conversation to open.
  */
-export function ensureDefaultSession(): void {
-  const existing = listSessions();
+export function ensureDefaultSession(adminUserId: string): void {
+  const existing = listSessions(adminUserId);
   if (existing.length > 0) return;
 
-  createSession({ title: 'New Conversation' });
-  console.log('[Session] Created default session');
+  createSession({ userId: adminUserId, title: 'New Conversation' });
+  console.log('[Session] Created default session for admin');
 }
 

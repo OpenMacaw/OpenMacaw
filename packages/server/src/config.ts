@@ -8,6 +8,8 @@ const configSchema = z.object({
   DATABASE_URL: z.string().default('./data/app.db'),
   DATA_DIR: z.string().default('./data'),
   AUTH_TOKEN: z.string().optional(),
+  
+  ENABLE_SIGNUP: z.coerce.boolean().default(true),
 
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),

@@ -1,0 +1,166 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
+import { apiFetch } from '../api';
+import { useAuth } from '../contexts/AuthContext';
+
+export default function Auth() {
+  const [mode, setMode] = useState<'loading' | 'login' | 'signup'>('loading');
+  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { login } = useAuth();
+
+  const from = (location.state as any)?.from?.pathname || '/chat';
+
+  useEffect(() => {
+    // Check if we need initial setup (First User = Admin)
+    apiFetch('/api/auth/status')
+      .then(r => r.json())
+      .then(data => {
+        if (data.needsSetup) {
+          setMode('signup');
+        } else {
+          setMode('login');
+        }
+      })
+      .catch(() => {
+        setError('Failed to connect to server.');
+        setMode('login'); // Fallback
+      });
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const endpoint = mode === 'signup' ? '/api/auth/register' : '/api/auth/login';
+      const res = await apiFetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form)
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Authentication failed');
+      }
+
+      login(data.token, data.user);
+      navigate(from, { replace: true });
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleMode = () => {
+    setError('');
+    setMode(prev => prev === 'login' ? 'signup' : 'login');
+  };
+
+  if (mode === 'loading') {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-white animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-black flex items-center justify-center p-4">
+      <div className="w-full max-w-sm bg-black/50 border border-white/10 rounded-2xl p-8 relative overflow-hidden">
+        
+        <div className="flex flex-col items-center mb-8">
+          <div className="text-4xl mb-4">🦜</div>
+          <h1 className="text-2xl font-semibold text-white mb-2 text-center">
+            {mode === 'signup' ? 'Sign Up' : 'Sign In'}
+          </h1>
+          <p className="text-sm text-gray-400 text-center">
+            {mode === 'signup' 
+              ? 'Create your account to get started' 
+              : 'Sign in to access your account'}
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {mode === 'signup' && (
+            <div>
+              <label className="block text-sm text-gray-300 mb-1.5">Name</label>
+              <input 
+                type="text" 
+                value={form.name}
+                onChange={e => setForm({...form, name: e.target.value})}
+                required={mode === 'signup'}
+                className="w-full bg-black border border-white/10 rounded-full px-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30 transition-all font-sans"
+                placeholder="Name"
+              />
+            </div>
+          )}
+          
+          <div>
+            <label className="block text-sm text-gray-300 mb-1.5">Email</label>
+            <input 
+              type="email" 
+              value={form.email}
+              onChange={e => setForm({...form, email: e.target.value})}
+              required
+              className="w-full bg-black border border-white/10 rounded-full px-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30 transition-all font-sans"
+              placeholder="name@example.com"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-300 mb-1.5">Password</label>
+            <input 
+              type="password" 
+              value={form.password}
+              onChange={e => setForm({...form, password: e.target.value})}
+              required
+              className="w-full bg-black border border-white/10 rounded-full px-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30 transition-all font-sans"
+              placeholder="••••••••"
+            />
+          </div>
+
+          {error && (
+            <div className="bg-red-950/30 border border-red-500/20 rounded-lg p-3 text-sm text-red-400 text-center">
+              {error}
+            </div>
+          )}
+
+          <button 
+            type="submit" 
+            disabled={loading}
+            className="w-full bg-white hover:bg-gray-200 text-black font-semibold text-sm py-2.5 rounded-full flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-6"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            {mode === 'signup' ? 'Create Account' : 'Sign in'}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center text-sm text-gray-500">
+          {mode === 'signup' ? (
+            <p>
+              Already have an account?{' '}
+              <button onClick={toggleMode} className="text-white hover:underline font-medium focus:outline-none">
+                Sign in
+              </button>
+            </p>
+          ) : (
+            <p>
+              Don't have an account?{' '}
+              <button onClick={toggleMode} className="text-white hover:underline font-medium focus:outline-none">
+                Sign up
+              </button>
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

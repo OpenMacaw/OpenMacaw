@@ -1,44 +1,48 @@
-FROM node:20-alpine AS base
-RUN apk add --no-cache libc-dev python3 make g++
-# Install uv/uvx so MCP servers distributed as Python tools (e.g. mcp-server-fetch) can run.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uvx /usr/local/bin/uvx
+FROM node:22-alpine AS builder
 
-FROM base AS builder
 WORKDIR /app
 
+# Enable npm workspaces
 COPY package*.json ./
-RUN npm install
+COPY packages/server/package*.json ./packages/server/
+COPY packages/web/package*.json ./packages/web/
 
-COPY packages/server/package*.json packages/server/
-COPY packages/web/package*.json packages/web/
-RUN npm install
+# Install dependencies strictly
+RUN npm ci
 
-COPY packages/server packages/server
-COPY packages/web packages/web
-COPY tsconfig.json package.json ./
+# Copy full source
+COPY . .
 
+# Build workspace (shared, server, web)
 RUN npm run build
 
-FROM base AS production
+# Stage 2: Production
+FROM node:22-alpine AS runner
+
 WORKDIR /app
 
-# Copy compiled output from builder
-COPY --from=builder /app/packages/server/dist packages/server/dist
-COPY --from=builder /app/packages/web/dist packages/web/dist
-
-# Copy node_modules from builder — all workspace deps are already installed there.
-# Re-running npm install in production requires all workspace package.json files
-# to be present; copying from builder is simpler and guaranteed correct.
-COPY --from=builder /app/node_modules node_modules
-
-# Copy package manifests so Node can resolve the workspace correctly at runtime
-COPY package*.json ./
-COPY packages/server/package.json packages/server/package.json
-
+# Set environments
 ENV NODE_ENV=production
 ENV PORT=3000
 
+# We need npm and npx locally for MCP shells to work smoothly
+# node:22-alpine already includes npm, so we just retain it.
+
+# Copy workspace roots
+COPY package*.json ./
+COPY packages/server/package*.json ./packages/server/
+COPY packages/web/package*.json ./packages/web/
+
+# We still need prod deps for server runner
+RUN npm ci --omit=dev
+
+# Copy compiled backends and frontend dist
+COPY --from=builder /app/packages/server/dist ./packages/server/dist
+COPY --from=builder /app/packages/web/dist ./packages/web/dist
+# Also need to copy schema exports/db or ensure production runs dist without TS.
+
+# Expose HTTP
 EXPOSE 3000
 
+# Container entrypoint
 CMD ["node", "packages/server/dist/index.js"]

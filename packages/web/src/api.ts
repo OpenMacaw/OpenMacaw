@@ -18,10 +18,17 @@ export type AgentEvent =
   | { type: 'agentic_done'; runId: string }
   | { type: 'agentic_cancelled'; runId: string; reason?: string };
 
-export async function apiFetch(endpoint: string, options?: RequestInit) {
+export async function apiFetch(endpoint: string, options: RequestInit = {}) {
   // Ensure endpoint starts with a slash
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  return fetch(`${API_BASE}${path}`, options);
+  
+  const headers = new Headers(options.headers || {});
+  const token = localStorage.getItem('openmacaw_token');
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  return fetch(`${API_BASE}${path}`, { ...options, headers });
 }
 
 export function getWsUrl(endpoint: string) {

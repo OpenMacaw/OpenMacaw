@@ -643,7 +643,7 @@ export class AgentRuntime {
 
       title = title.trim().replace(/^["']|["']$/g, '').substring(0, 60);
       if (title) {
-        updateSession(this.config.sessionId, { title });
+        updateSession(this.config.sessionId, undefined, { title });
         this.eventHandler({ type: 'session_renamed', sessionId: this.config.sessionId, newTitle: title });
         console.log('[Agent] Auto-titled session:', title);
       }

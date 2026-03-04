@@ -11,15 +11,18 @@ const createSessionSchema = z.object({
 });
 
 export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
-  fastify.get('/api/sessions', async (_request: FastifyRequest, reply: FastifyReply) => {
-    const sessions = listSessions();
+  fastify.get('/api/sessions', async (request: FastifyRequest, reply: FastifyReply) => {
+    const userId = (request as any).user.id;
+    const sessions = listSessions(userId);
     return reply.send(sessions);
   });
 
   fastify.post('/api/sessions', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createSessionSchema.parse(request.body);
+    const userId = (request as any).user.id;
     
     const session = createSession({
+      userId,
       title: body.title,
       model: body.model,
       personality: body.personality,
@@ -30,7 +33,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get('/api/sessions/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
-    const session = getSession(id);
+    const userId = (request as any).user.id;
+    const session = getSession(id, userId);
     
     if (!session) {
       return reply.code(404).send({ error: 'Session not found' });
@@ -58,9 +62,10 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.put('/api/sessions/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
+    const userId = (request as any).user.id;
     const body = createSessionSchema.partial().parse(request.body);
     
-    const updated = updateSession(id, body);
+    const updated = updateSession(id, userId, body);
     if (!updated) {
       return reply.code(404).send({ error: 'Session not found' });
     }
@@ -70,13 +75,21 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.delete('/api/sessions/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
-    deleteSession(id);
+    const userId = (request as any).user.id;
+    deleteSession(id, userId);
     return reply.send({ success: true });
   });
 
-  // DELETE /api/sessions/:id/messages — clear all messages for a session (used by /clear slash command)
   fastify.delete('/api/sessions/:id/messages', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
+    const userId = (request as any).user.id;
+    
+    // Explicitly verify ownership before deleting messages
+    const session = getSession(id, userId);
+    if (!session) {
+      return reply.code(404).send({ error: 'Session not found' });
+    }
+
     const db = getDb();
     db.delete(schema.messages as any).where((col: (k: string) => unknown) => col('sessionId') === id);
     return reply.send({ success: true, cleared: true });
