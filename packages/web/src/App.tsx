@@ -256,6 +256,7 @@ function App() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [executionLogs, setExecutionLogs] = useState<{ id: string, time: string, message: string, type: 'info' | 'success' | 'error' }[]>([]);
   const inspectorRef = useRef<HTMLDivElement>(null);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
@@ -386,10 +387,43 @@ function App() {
     <>
       <AgentPanel isOpen={isAgentPanelOpen} onClose={() => setIsAgentPanelOpen(false)} isCollapsed={false} />
 
+      {/* ── Mobile top bar (hamburger + logo) — hidden on lg+ ── */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-12 bg-zinc-950 border-b border-white/5 flex items-center px-3 gap-3 z-30">
+        <button
+          onClick={() => setIsSidebarOpen(v => !v)}
+          className="p-1.5 rounded-md text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
+          aria-label="Toggle menu"
+        >
+          {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
+        <Shield className="w-4 h-4 text-cyan-500 shrink-0" />
+        <span className="font-bold text-white text-sm">OpenMacaw</span>
+      </div>
+
+      {/* ── Mobile backdrop ── */}
+      {isSidebarOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-black/60 z-30 backdrop-blur-sm"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
       <div className="flex h-screen bg-black text-gray-200 overflow-hidden font-sans">
 
-        {/* ── Left Pane (Thin: Nav & Servers) ── */}
-        <aside className="w-56 flex flex-col bg-zinc-950 border-r border-white/5 shrink-0">
+        {/* ── Left Pane (Nav & Servers) ──
+              Mobile: fixed overlay that slides in from the left
+              Desktop: normal flex column, always visible               */}
+        <aside className={[
+          'flex flex-col bg-zinc-950 border-r border-white/5 shrink-0',
+          // Mobile: fixed overlay
+          'fixed inset-y-0 left-0 z-40 w-64 shadow-2xl',
+          'transition-transform duration-200 ease-in-out',
+          isSidebarOpen ? 'translate-x-0' : '-translate-x-full',
+          // Desktop: back in normal flow, always visible
+          'lg:relative lg:translate-x-0 lg:w-56 lg:shadow-none lg:z-auto',
+        ].join(' ')}>
+
+          {/* Logo row — only shown inside the sidebar on desktop; mobile uses the top bar */}
           <div className="h-12 flex items-center px-4 border-b border-white/5 gap-2">
             <Shield className="w-4 h-4 text-cyan-500" />
             <span className="font-bold text-white text-sm">OpenMacaw</span>
@@ -404,6 +438,7 @@ function App() {
                   key={item.path}
                   to={item.path}
                   title={item.label}
+                  onClick={() => setIsSidebarOpen(false)}
                   className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${isActive ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'
                     }`}
                 >
@@ -425,8 +460,8 @@ function App() {
                 <div
                   key={server.id}
                   onClick={() => {
-                    console.log('Opening drawer for:', server.id);
                     setSelectedServerId(server.id);
+                    setIsSidebarOpen(false);
                   }}
                   className="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer hover:bg-white/10 transition-colors group"
                 >
@@ -458,7 +493,7 @@ function App() {
 
           <div className="p-2 border-t border-white/5 space-y-1">
             <button
-              onClick={() => setIsAgentPanelOpen(true)}
+              onClick={() => { setIsAgentPanelOpen(true); setIsSidebarOpen(false); }}
               className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors"
             >
               <Bot className="w-4 h-4 shrink-0" />
@@ -466,7 +501,7 @@ function App() {
             </button>
             {location.pathname.startsWith('/chat') && (
               <button
-                onClick={handleNewChat}
+                onClick={() => { handleNewChat(); setIsSidebarOpen(false); }}
                 className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-cyan-400 hover:bg-cyan-950/30 hover:text-cyan-300 transition-colors"
               >
                 <Plus className="w-4 h-4 shrink-0" />
@@ -477,7 +512,8 @@ function App() {
         </aside>
 
         {/* ── Middle Pane (Wide: Main Interaction) ── */}
-        <main className="flex-1 flex flex-col min-w-0 bg-black z-0 relative">
+        {/* pt-12 on mobile accounts for the fixed top bar; lg resets it */}
+        <main className="flex-1 flex flex-col min-w-0 bg-black z-0 relative pt-12 lg:pt-0">
           <Outlet />
         </main>
 
