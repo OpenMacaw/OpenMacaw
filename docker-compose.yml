@@ -1,11 +1,9 @@
-version: '3.8'
-
 services:
   openmacaw:
     build:
       context: .
       dockerfile: Dockerfile
-    image: openmacaw:latest
+    image: openmacaw
     container_name: openmacaw
     ports:
       - "3000:3000"
