@@ -1811,11 +1811,18 @@ export default function Chat() {
                 if (msg.role === 'user' && msg.content?.startsWith('[SYSTEM]')) {
                   return null;
                 }
-                // Hide assistant messages that are agentic step-execution outputs.
-                // These contain [STEP_START:N] markers — they are the runtime's intermediate
-                // per-step work saved to the DB.  Only the final summary (no markers) is shown.
+                // Hide assistant messages that are only agentic step-execution markers
+                // (e.g. "[STEP_START:1]" saved as preamble to a tool call — ~14 chars).
+                // The model's final summary turn also starts with step markers but has
+                // real content after them; strip the markers and let those through so the
+                // rendering code below can display the cleaned text.
                 if (msg.role === 'assistant' && msg.content?.includes('[STEP_START:')) {
-                  return null;
+                  const stripped = msg.content
+                    .replace(/\[STEP_START:\d+\]\n?/g, '')
+                    .replace(/\[STEP_DONE:\d+\]\n?/g, '')
+                    .trim();
+                  if (!stripped) return null;
+                  // Fall through — the rendering code at line ~2011 will strip the markers.
                 }
 
                 // ── Agentic DB-persisted messages (status-driven) ─────────────────────────
