@@ -61,6 +61,27 @@ export async function executeRoutes(fastify: FastifyInstance): Promise<void> {
           const extracted = extractServerIdFromToolName(call.name);
           serverId = extracted.serverId;
           toolName = extracted.toolName;
+
+          // If still unresolved, look up the pending proposal in the DB by toolCallId.
+          // The runtime saves serverId inside the toolCalls JSON payload so we can
+          // recover it here even when the frontend's live lookup hasn't finished.
+          if (!serverId && call.id) {
+            const proposalMsg = (await db.select()
+              .from(schema.messages)
+              .where(eq(schema.messages.toolCallId, call.id))
+              .limit(1))[0];
+            if (proposalMsg?.toolCalls) {
+              try {
+                const savedCalls = JSON.parse(proposalMsg.toolCalls) as any[];
+                const matched = savedCalls.find((c: any) => c.id === call.id || c.name === call.name);
+                if (matched?.serverId) {
+                  serverId = matched.serverId;
+                  toolName = matched.name || call.name;
+                  console.log(`[Execute API] Recovered serverId '${serverId}' from DB proposal for tool '${toolName}'`);
+                }
+              } catch { /* malformed JSON — fall through to the error below */ }
+            }
+          }
         }
 
         if (!serverId) {

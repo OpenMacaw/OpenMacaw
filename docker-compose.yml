@@ -3,15 +3,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: openmacaw
     container_name: openmacaw
     ports:
       - "3000:3000"
     volumes:
-      - ./data:/app/packages/server/data
+      - ./data:/app/data
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - DATABASE_URL=/app/data/app.db
       # Change this to a secure random string in production
       - JWT_SECRET=super-secret-openmacaw-key-change-me
       

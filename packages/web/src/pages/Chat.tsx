@@ -1326,6 +1326,44 @@ export default function Chat() {
           break;
         }
 
+        case 'batch_proposal': {
+          const batchData = data as any;
+          console.log('[WS] Received BATCH_PROPOSAL event:', batchData);
+          dispatch({ type: 'END_STREAM' });
+          streamingStartedRef.current = false;
+
+          const toolCalls = batchData.toolCalls || [];
+          const toolList = toolCalls.map((t: any) => t.tool).join(', ');
+
+          const newProposalMsg = {
+            id: batchData.id || `batch-proposal-${Date.now()}`,
+            role: 'assistant' as const,
+            content: `I propose executing ${toolCalls.length} tool(s): ${toolList}. Please authorize all at once.`,
+            toolCallId: batchData.id,
+            toolCalls: JSON.stringify(toolCalls.map((t: any, idx: number) => ({
+              id: `batch-call-${idx}`,
+              name: t.tool,
+              arguments: t.input,
+              resolvedServerId: t.server,
+            })))
+          };
+
+          queryClient.setQueryData(['session', currentSessionId], (old: any) => {
+            if (!old) return old;
+            const alreadyExists = (old.messages || []).some((m: any) => m.id === newProposalMsg.id);
+            if (alreadyExists) return old;
+            return {
+              ...old,
+              messages: [...(old.messages || []).map((m: any) => ({ ...m })), newProposalMsg]
+            };
+          });
+
+          window.dispatchEvent(new CustomEvent('openmacaw:inspector', {
+            detail: { type: 'batch_proposal', toolCalls: batchData.toolCalls, id: batchData.id }
+          }));
+          break;
+        }
+
         case 'pipeline_stage': {
           // Map internal stage IDs to user-facing labels.
           const stageLabels: Record<string, string> = {

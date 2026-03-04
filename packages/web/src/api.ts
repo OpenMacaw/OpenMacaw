@@ -6,6 +6,7 @@ export type AgentEvent =
   | { type: 'tool_call_result'; outcome: 'allowed' | 'denied'; result?: unknown; reason?: string }
   | { type: 'message_end'; usage: { inputTokens: number; outputTokens: number } }
   | { type: 'proposal'; id?: string; tool: string; input: Record<string, unknown> }
+  | { type: 'batch_proposal'; id: string; toolCalls: Array<{ tool: string; server: string; input: Record<string, unknown> }> }
   | { type: 'error'; message: string; code?: string }
   | { type: 'step_count'; count: number }
   | { type: 'session_renamed'; sessionId: string; newTitle: string }

@@ -14,19 +14,23 @@ export class OpenAIProvider implements LLMProvider {
   ];
 
   private client: OpenAI | null = null;
+  private clientApiKey: string | null = null;
 
   private getClient(): OpenAI {
-    if (!this.client) {
-      const config = getConfig();
-      const db = getDb();
-      const settings = db.select(schema.settings as any).where().all() as any[];
-      const apiKeySetting = settings.find((s: any) => s.key === 'OPENAI_API_KEY');
-      const apiKey = apiKeySetting?.value || config.OPENAI_API_KEY;
+    const config = getConfig();
+    const db = getDb();
+    const globalSettings = db.select(schema.settings as any).where().all() as any[];
+    const globalKeySetting = globalSettings.find((s: any) => s.key === 'OPENAI_API_KEY');
+    const userSettings = db.select('user_settings' as any).where().all() as any[];
+    const userKeySetting = userSettings.find((s: any) => s.key === 'OPENAI_API_KEY');
+    const apiKey = userKeySetting?.value || globalKeySetting?.value || config.OPENAI_API_KEY;
 
-      if (!apiKey) {
-        throw new Error('OPENAI_API_KEY not configured');
-      }
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY not configured');
+    }
+    if (!this.client || this.clientApiKey !== apiKey) {
       this.client = new OpenAI({ apiKey });
+      this.clientApiKey = apiKey;
     }
     return this.client;
   }

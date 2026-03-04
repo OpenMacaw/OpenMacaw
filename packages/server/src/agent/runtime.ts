@@ -58,6 +58,7 @@ export type AgentEvent =
   | { type: 'tool_call_result'; outcome: 'allowed' | 'denied'; result?: unknown; reason?: string }
   | { type: 'message_end'; usage: { inputTokens: number; outputTokens: number } }
   | { type: 'proposal'; id: string; tool: string; input: Record<string, unknown> }
+  | { type: 'batch_proposal'; id: string; toolCalls: Array<{ tool: string; server: string; input: Record<string, unknown> }> }
   | { type: 'error'; message: string; code?: string }
   | { type: 'step_count'; count: number }
   | { type: 'session_renamed'; sessionId: string; newTitle: string }
@@ -88,6 +89,9 @@ export class AgentRuntime {
   private toolCallTimestamps: number[] = [];
   private readonly RATE_LIMIT_WINDOW_MS = 10_000;
   private readonly RATE_LIMIT_MAX_CALLS = 3;
+
+  // Batch tool call collection for user approval
+  private pendingToolBatch: Array<{ toolCall: ToolCall; serverId: string; toolName: string; precedingText: string }> = [];
 
   constructor(config: AgentConfig, eventHandler: EventHandler) {
     this.config = config;

@@ -13,19 +13,26 @@ export class AnthropicProvider implements LLMProvider {
   ];
 
   private client: Anthropic | null = null;
+  private clientApiKey: string | null = null;
 
   private getClient(): Anthropic {
-    if (!this.client) {
-      const config = getConfig();
-      const db = getDb();
-      const settings = db.select(schema.settings as any).where().all() as any[];
-      const apiKeySetting = settings.find((s: any) => s.key === 'ANTHROPIC_API_KEY');
-      const apiKey = apiKeySetting?.value || config.ANTHROPIC_API_KEY;
-      
-      if (!apiKey) {
-        throw new Error('ANTHROPIC_API_KEY not configured');
-      }
+    const config = getConfig();
+    const db = getDb();
+    // Check global settings table first, then fall back to env
+    const globalSettings = db.select(schema.settings as any).where().all() as any[];
+    const globalKeySetting = globalSettings.find((s: any) => s.key === 'ANTHROPIC_API_KEY');
+    // Also check user_settings (written by the Settings page)
+    const userSettings = db.select('user_settings' as any).where().all() as any[];
+    const userKeySetting = userSettings.find((s: any) => s.key === 'ANTHROPIC_API_KEY');
+    const apiKey = userKeySetting?.value || globalKeySetting?.value || config.ANTHROPIC_API_KEY;
+
+    if (!apiKey) {
+      throw new Error('ANTHROPIC_API_KEY not configured');
+    }
+    // Rebuild client whenever the key changes (e.g. user saved a new key in Settings)
+    if (!this.client || this.clientApiKey !== apiKey) {
       this.client = new Anthropic({ apiKey });
+      this.clientApiKey = apiKey;
     }
     return this.client;
   }
