@@ -266,20 +266,23 @@ export class AgentRuntime {
         continue;
       }
 
-      // Emit message_end and save the assistant message now that we know the
+      // Save the assistant message and emit message_end now that we know the
       // response is legitimate (not a hallucinated action).
+      // IMPORTANT: save to DB first so the message exists before message_end
+      // signals the client to call invalidateQueries and re-fetch the session.
       if (pendingUsage) {
-        this.eventHandler({ type: 'message_end', usage: pendingUsage });
+        const usageToReport = pendingUsage;
+        pendingUsage = null;
         // Only save text if there was NO tool call this turn.
         // When there IS a tool call, handleToolCall already saves the proposal
         // as the single assistant message for this turn. Saving a second
         // assistant message would create an invalid consecutive-assistant
         // sequence that the Anthropic API rejects.
         if (deltaText && !currentTurnHadToolCall) {
-          await this.saveMessage('assistant', deltaText, pendingUsage);
+          await this.saveMessage('assistant', deltaText, usageToReport);
           this.messages.push({ role: 'assistant', content: deltaText });
         }
-        pendingUsage = null;
+        this.eventHandler({ type: 'message_end', usage: usageToReport });
       }
 
       if (!deltaText && this.stepCount >= this.maxSteps) {
