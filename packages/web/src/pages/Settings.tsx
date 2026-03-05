@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Loader2, Cpu, Monitor, ToggleLeft, ToggleRight, Smartphone, Download, CheckCircle2, Bell, BellOff, Key } from 'lucide-react';
+import { useRef } from 'react';
+import { Save, Loader2, Cpu, Monitor, ToggleLeft, ToggleRight, Smartphone, Download, CheckCircle2, Bell, BellOff, Key, User as UserIcon, Upload } from 'lucide-react';
 import { apiFetch } from '../api';
+import { useAuth } from '../contexts/AuthContext';
 import {
   notificationsSupported,
   notificationPermission,
@@ -32,8 +34,38 @@ function Toggle({ enabled, onToggle, label }: { enabled: boolean; onToggle: () =
 
 export default function Settings() {
   const queryClient = useQueryClient();
+  const { user, refreshUser } = useAuth();
   const [formData, setFormData] = useState<UserSettings>({});
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarSuccess, setAvatarSuccess] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await apiFetch('/api/user/profile', {
+        method: 'PUT',
+        // Omit Content-Type header so the browser automatically sets `multipart/form-data` with the correct boundary
+        body: formData
+      });
+      if (res.ok) {
+        await refreshUser();
+        setAvatarSuccess(true);
+        setTimeout(() => setAvatarSuccess(false), 3000);
+      }
+    } catch (err) {
+      console.error('Failed to upload avatar', err);
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   // ── PWA / Notifications state ─────────────────────────────────────────────
   const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() =>
@@ -171,6 +203,42 @@ export default function Settings() {
 
       {/* Grid Layout */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+        {/* ── Profile ─────────────────────────────── */}
+        <div className={cardClass}>
+          <div className="flex items-center gap-2 mb-5">
+            <UserIcon className="w-4 h-4 text-cyan-500" />
+            <h2 className="text-sm font-bold text-white uppercase tracking-wider">Profile Picture</h2>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded border border-white/10 bg-zinc-950 flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
+              {user?.profileImageUrl ? (
+                <img src={user.profileImageUrl} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xl font-mono font-bold text-gray-500 uppercase">{user?.name?.charAt(0) || 'U'}</span>
+              )}
+            </div>
+            <div>
+              <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleAvatarUpload} />
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingAvatar}
+                className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-white/10 rounded text-xs font-medium text-gray-200 transition-colors shadow-sm"
+                type="button"
+              >
+                {uploadingAvatar ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                {uploadingAvatar ? 'Uploading...' : 'Upload Avatar'}
+              </button>
+              {avatarSuccess ? (
+                <p className="text-[10px] text-green-500 font-mono mt-2 leading-tight flex items-center gap-1 animate-pulse">
+                  <CheckCircle2 className="w-3 h-3"/> Upload successful!
+                </p>
+              ) : (
+                <p className="text-[10px] text-gray-500 font-mono mt-2 leading-tight">Recommended max size: 1MB.</p>
+              )}
+            </div>
+          </div>
+        </div>
 
         {/* ── Personal API Keys ─────────────────────────────── */}
         <div className={cardClass}>

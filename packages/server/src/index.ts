@@ -3,6 +3,7 @@ import fastifyStatic from '@fastify/static';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyJwt from '@fastify/jwt';
+import fastifyMultipart from '@fastify/multipart';
 import { existsSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -47,6 +48,11 @@ async function buildApp() {
   await fastify.register(fastifyJwt, {
     secret: process.env.JWT_SECRET || 'super-secret-openmacaw-key-change-me'
   });
+  await fastify.register(fastifyMultipart, {
+    limits: {
+      fileSize: 5 * 1024 * 1024 // 5MB max file size
+    }
+  });
 
   // Global Auth Middleware
   fastify.addHook('onRequest', async (request, reply) => {
@@ -58,6 +64,17 @@ async function buildApp() {
     if (url.startsWith('/api/')) {
       try {
         await request.jwtVerify();
+        const payload = (request as any).user;
+        if (payload?.id) {
+          const db = getDrizzleDb();
+          const users = await db.select().from(schema.users).where(eq(schema.users.id, payload.id)).limit(1);
+          const currentUser = users[0];
+          if (!currentUser || currentUser.role === 'pending') {
+            return reply.code(401).send({ error: 'Unauthorized or account disabled.' });
+          }
+        } else {
+          return reply.code(401).send({ error: 'Unauthorized. Invalid token.' });
+        }
       } catch (err) {
         return reply.code(401).send({ error: 'Unauthorized. Please log in.' });
       }

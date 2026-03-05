@@ -10,6 +10,7 @@ const configSchema = z.object({
   AUTH_TOKEN: z.string().optional(),
   
   ENABLE_SIGNUP: z.coerce.boolean().default(true),
+  DEFAULT_NEW_USER_ROLE: z.enum(['pending', 'user']).default('pending'),
 
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),

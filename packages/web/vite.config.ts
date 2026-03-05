@@ -88,6 +88,7 @@ export default defineConfig({
   root: '.',
   server: {
     port: 5173,
+    hmr: { overlay: true },
     proxy: {
       '/api': {
         target: 'http://localhost:4000',

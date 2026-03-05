@@ -29,7 +29,14 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}) {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  return fetch(`${API_BASE}${path}`, { ...options, headers });
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  
+  if (!path.startsWith('/api/auth/') && res.status === 401) {
+    localStorage.removeItem('openmacaw_token');
+    window.location.href = '/auth';
+  }
+
+  return res;
 }
 
 export function getWsUrl(endpoint: string) {

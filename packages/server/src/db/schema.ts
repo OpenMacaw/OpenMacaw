@@ -7,6 +7,7 @@ export const users = sqliteTable('users', {
   passwordHash: text('password_hash').notNull(),
   role: text('role').notNull().default('user'),
   isSuperAdmin: integer('is_super_admin').notNull().default(0),
+  profileImageUrl: text('profile_image_url'),
   lastActive: integer('last_active', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
@@ -125,12 +126,26 @@ export const settings = sqliteTable('settings', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
+export const pipelines = sqliteTable('pipelines', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  type: text('type').notNull(),
+  enabled: integer('enabled').notNull().default(1),
+  sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
+  config: text('config').notNull().default('{}'),
+  status: text('status').notNull().default('stopped'),
+  errorMessage: text('error_message'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
 export type Server = typeof servers.$inferSelect;
 export type Permission = typeof permissions.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type ActivityLogEntry = typeof activityLog.$inferSelect;
 export type PipelineLogEntry = typeof pipelineLog.$inferSelect;
+export type Pipeline = typeof pipelines.$inferSelect;
 export type Setting = typeof settings.$inferSelect;
 export type User = typeof users.$inferSelect;
 

@@ -39,15 +39,28 @@ export default function Auth() {
 
     try {
       const endpoint = mode === 'signup' ? '/api/auth/register' : '/api/auth/login';
-      const res = await apiFetch(endpoint, {
+      const cacheBustedEndpoint = `${endpoint}?t=${Date.now()}`;
+      
+      const res = await apiFetch(cacheBustedEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)
       });
       const data = await res.json();
+      
+      console.log('[DEBUG] Auth Response Status:', res.status, 'Message:', data.message, 'Error:', data.error);
 
       if (!res.ok) {
-        throw new Error(data.error || 'Authentication failed');
+        if (res.status === 403 && data.message === 'Account Activation Pending') {
+          navigate('/auth/pending', { state: { email: form.email, password: form.password }, replace: true });
+          return;
+        }
+        throw new Error(data.error || data.message || 'Authentication failed');
+      }
+
+      if (mode === 'signup' && !data.token) {
+        navigate('/auth/pending', { state: { email: form.email, password: form.password }, replace: true });
+        return;
       }
 
       login(data.token, data.user);

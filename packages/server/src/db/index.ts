@@ -351,6 +351,12 @@ export function initDatabase(): void {
     } catch { /* already crowned */ }
   }
 
+  // ── Phase 76: Gatekeeper Registration Flow & Profile Pictures ─────────────
+  try {
+    sqlite.exec("ALTER TABLE users ADD COLUMN profile_image_url TEXT");
+    console.log('[DB Migration] Phase 76: profile_image_url column added.');
+  } catch (e) { /* column already exists */ }
+
   drizzleDb = drizzle(sqlite, { schema: schemaMappings });
 
   // Migrate from legacy JSON store on first run

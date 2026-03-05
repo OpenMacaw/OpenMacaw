@@ -12,6 +12,7 @@ import Pipelines from './pages/Pipelines';
 import Catalog from './pages/Catalog';
 import Admin from './pages/Admin';
 import Auth from './pages/Auth';
+import Pending from './pages/Pending';
 import { AuthProvider, ProtectedRoute, AdminRoute } from './contexts/AuthContext';
 import './index.css';
 
@@ -57,6 +58,7 @@ createRoot(document.getElementById('root')!).render(
       <AuthProvider>
         <Routes>
           <Route path="/auth" element={<Auth />} />
+          <Route path="/auth/pending" element={<Pending />} />
           <Route path="/" element={<ProtectedRoute><App /></ProtectedRoute>}>
             <Route index element={<Navigate to="/chat" replace />} />
             <Route path="chat" element={<Chat />}>

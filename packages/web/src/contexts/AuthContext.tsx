@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { apiFetch } from '../api';
 
@@ -8,6 +8,7 @@ export interface User {
   email: string;
   role: string;
   isSuperAdmin?: number;
+  profileImageUrl?: string;
 }
 
 interface AuthContextType {
@@ -47,7 +48,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await apiFetch('/api/auth/me');
       if (res.ok) {
-        const freshUser: User = await res.json();
+        const data = await res.json();
+        
+        // Phase 87: Self-Healing JWT
+        if (data.token) {
+          setToken(data.token);
+          localStorage.setItem('openmacaw_token', data.token);
+        }
+        
+        const freshUser: User = data.user;
         setUser(freshUser);
         localStorage.setItem('openmacaw_user', JSON.stringify(freshUser));
       }
@@ -55,6 +64,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Silently ignore refresh errors — session will expire naturally
     }
   };
+
+  useEffect(() => {
+    refreshUser();
+
+    // Automatically check for updated DB roles/permissions when the user tabs back into the app
+    const onFocus = () => refreshUser();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
 
   return (
     <AuthContext.Provider value={{ token, user, login, logout, refreshUser }}>

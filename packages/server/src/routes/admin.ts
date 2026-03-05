@@ -140,7 +140,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
     const isSuperAdmin = requestingUserRecord?.isSuperAdmin === 1;
 
     if (!isSuperAdmin) {
-      // Block standard admins from editing other admins
+      // Block standard admins from editing ANY details of other admins
       if (target.role === 'admin' && currentUser.id !== id) {
         return reply.code(403).send({ error: 'Admins cannot modify other Admins. Only the Super Admin has this power.' });
       }
@@ -157,8 +157,8 @@ export async function adminRoutes(fastify: FastifyInstance) {
     }
 
     // Validate role if provided
-    if (role && role !== 'admin' && role !== 'user') {
-      return reply.code(400).send({ error: 'Role must be "admin" or "user".' });
+    if (role && role !== 'admin' && role !== 'user' && role !== 'pending') {
+      return reply.code(400).send({ error: 'Role must be "admin", "user", or "pending".' });
     }
 
     // Validate new password if provided
@@ -192,7 +192,20 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
     await db.update(schema.users).set(updates).where(eq(schema.users.id, id));
 
-    return { success: true, updatedUserId: id };
+    let token;
+    // Identity Sync (Phase 85): If updating yourself, issue a fresh JWT
+    if (currentUser.id === id) {
+      const newPayload = {
+        id: target.id,
+        name: updates.name ?? target.name,
+        email: updates.email ?? target.email,
+        role: updates.role ?? target.role,
+        isSuperAdmin: target.isSuperAdmin
+      };
+      token = fastify.jwt.sign(newPayload, { expiresIn: '7d' });
+    }
+
+    return { success: true, updatedUserId: id, token };
   });
 
   // ── DELETE /api/admin/users/:id ───────────────────────────────────────────

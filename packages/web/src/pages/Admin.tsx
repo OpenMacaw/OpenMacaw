@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, MessageSquare, Database, Trash2, ShieldAlert, Loader2, Pencil, X, Save, Cpu, Bot, Shield, CheckCircle2, Settings2, ToggleLeft, ToggleRight, Crown, UserPlus } from 'lucide-react';
+import { Settings, Users, Save, Loader2, Cpu, Bot, Shield, CheckCircle2, ShieldAlert, Key, Plus, ExternalLink, Activity, Network, Pencil, X, Crown, Check, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, Database, Trash2, Settings2, ToggleLeft, ToggleRight, UserPlus } from 'lucide-react';
 import { apiFetch } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -22,14 +22,20 @@ interface AdminUser {
 }
 
 interface WorkspaceSettings {
+  // LLM Provider Settings
   OLLAMA_BASE_URL?: string;
   DEFAULT_PROVIDER?: string;
   DEFAULT_MODEL?: string;
+  // Agent Behavior
   MAX_STEPS?: string;
   TEMPERATURE?: string;
   PERSONALITY?: string;
+  // Advanced Directives
   STRICT_JSON_MODE?: string;
   MAX_DENIAL_RETRIES?: string;
+  // Sign Ups
+  ENABLE_SIGNUP?: string;
+  DEFAULT_NEW_USER_ROLE?: string;
 }
 
 function formatBytes(bytes: number): string {
@@ -123,7 +129,17 @@ function EditUserModal({
       }
       return res.json();
     },
-    onSuccess: async () => {
+    onSuccess: async (data: any) => {
+      window.dispatchEvent(new CustomEvent('openmacaw:auth_refresh'));
+      
+      // Identity Sync (Phase 85): If the backend provided a fresh JWT for us
+      if (isSelf && data.token) {
+        // We must re-decode or simply fetch a fresh user object.
+        // The easiest way is to let AuthContext refresh it.
+        // However, `login` takes both token and user object. Let's update token in LC and refresh.
+        localStorage.setItem('openmacaw_token', data.token);
+      }
+
       // If editing our own profile, refresh global auth state so sidebar reflects changes instantly
       if (isSelf) {
         await refreshUser();
@@ -175,6 +191,7 @@ function EditUserModal({
                 className="w-full px-3 py-2 bg-black border border-white/10 rounded-md text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500 font-mono disabled:opacity-50 disabled:cursor-not-allowed">
                 <option value="admin">Admin</option>
                 <option value="user">User</option>
+                <option value="pending">Pending</option>
               </select>
               {isSelf && <p className="mt-1 text-[10px] text-gray-600 font-mono">You cannot change your own role.</p>}
             </div>
@@ -312,6 +329,7 @@ function AddUserModal({
                 className="w-full px-3 py-2 bg-black border border-white/10 rounded-md text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 font-mono">
                 <option value="user">User</option>
                 {viewerIsSuperAdmin && <option value="admin">Admin</option>}
+                <option value="pending">Pending</option>
               </select>
               {!viewerIsSuperAdmin && (
                 <p className="mt-1 text-[10px] text-gray-600 font-mono">Only the Super Admin can create Admin accounts.</p>
@@ -369,6 +387,11 @@ export default function Admin() {
   const [fetchingModels, setFetchingModels] = useState(false);
   const [modelCapability, setModelCapability] = useState<'ok' | 'no_tools' | 'checking' | null>(null);
 
+  type SortField = 'name' | 'email' | 'role' | 'lastActive' | 'createdAt';
+  type SortDirection = 'asc' | 'desc';
+  const [sortField, setSortField] = useState<SortField>('role'); // Default sort by role (brings pending up initially)
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
   const { data: stats, isLoading: statsLoading } = useQuery<AdminStats>({
     queryKey: ['admin-stats'],
     queryFn: async () => {
@@ -416,6 +439,22 @@ export default function Admin() {
     },
   });
 
+  const approveMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const res = await apiFetch(`/api/admin/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'user' })
+      });
+      if (!res.ok) throw new Error('Failed to approve user');
+      return res.json();
+    },
+    onSuccess: () => {
+      window.dispatchEvent(new CustomEvent('openmacaw:auth_refresh'));
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+    },
+  });
+
   const wsSaveMutation = useMutation({
     mutationFn: async (updates: WorkspaceSettings) => {
       for (const [key, value] of Object.entries(updates)) {
@@ -436,6 +475,56 @@ export default function Admin() {
   const handleWsSave = () => {
     setWsSaveStatus('saving');
     wsSaveMutation.mutate(wsForm);
+  };
+
+  const sortedUsers = useMemo(() => {
+    if (!users) return [];
+    return [...users].sort((a, b) => {
+      // Always put 'pending' at the absolute top, regardless of sort, UNLESS we are explicitly sorting by role. 
+      // Actually, if we sort by Role, pending vs user vs admin will naturally cluster.
+      // Let's implement full sorting for the selected column.
+      
+      let valA: any = a[sortField];
+      let valB: any = b[sortField];
+      
+      if (sortField === 'name') {
+         valA = a.name?.toLowerCase() || '';
+         valB = b.name?.toLowerCase() || '';
+      } else if (sortField === 'email') {
+         valA = a.email?.toLowerCase() || '';
+         valB = b.email?.toLowerCase() || '';
+      } else if (sortField === 'role') {
+         // Custom role weight: pending (0), admin (1), user (2)
+         const roleWeight = (r: string) => r === 'pending' ? 0 : r === 'admin' ? 1 : 2;
+         valA = roleWeight(a.role);
+         valB = roleWeight(b.role);
+      } else if (sortField === 'lastActive') {
+         // Push nulls to the bottom regardless of asc/desc, or treat nulls as 0. 
+         valA = a.lastActive || 0;
+         valB = b.lastActive || 0;
+      } else if (sortField === 'createdAt') {
+         valA = a.createdAt || 0;
+         valB = b.createdAt || 0;
+      }
+      
+      if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+      if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [users, sortField, sortDirection]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 opacity-30 group-hover:opacity-100 transition-opacity" />;
+    return sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />;
   };
 
   const fetchOllamaModels = async () => {
@@ -536,21 +625,32 @@ export default function Admin() {
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-white/5 bg-black/50">
-                  <th className="px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 font-medium">Name</th>
-                  <th className="px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 font-medium">Email</th>
-                  <th className="px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 font-medium">Role</th>
-                  <th className="px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 font-medium">Last Active</th>
-                  <th className="px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 font-medium">Created</th>
+                  <th className="px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 font-medium">
+                    <button onClick={() => handleSort('name')} className="flex items-center gap-1.5 hover:text-gray-300 group">Name <SortIcon field="name" /></button>
+                  </th>
+                  <th className="px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 font-medium">
+                    <button onClick={() => handleSort('email')} className="flex items-center gap-1.5 hover:text-gray-300 group">Email <SortIcon field="email" /></button>
+                  </th>
+                  <th className="px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 font-medium">
+                    <button onClick={() => handleSort('role')} className="flex items-center gap-1.5 hover:text-gray-300 group">Role <SortIcon field="role" /></button>
+                  </th>
+                  <th className="px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 font-medium">
+                    <button onClick={() => handleSort('lastActive')} className="flex items-center gap-1.5 hover:text-gray-300 group">Last Active <SortIcon field="lastActive" /></button>
+                  </th>
+                  <th className="px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 font-medium">
+                    <button onClick={() => handleSort('createdAt')} className="flex items-center gap-1.5 hover:text-gray-300 group">Created <SortIcon field="createdAt" /></button>
+                  </th>
                   <th className="px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {users.map((u) => {
+                {sortedUsers.map((u) => {
                   const isSelf = u.id === currentUser?.id;
                   const isConfirming = confirmDeleteId === u.id;
                   const targetIsAdmin = u.role === 'admin';
                   // King can act on everyone except themselves; standard admin blocked from other admins
                   const canActOnTarget = !isSelf && (viewerIsSuperAdmin || !targetIsAdmin);
+                  const canEditTarget = isSelf || canActOnTarget;
                   return (
                     <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
                       <td className="px-4 py-3">
@@ -573,6 +673,7 @@ export default function Admin() {
                           </span>
                         ) : (
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold font-mono uppercase tracking-wider ${
+                            u.role === 'pending' ? 'bg-zinc-800 text-gray-400 border border-white/10' :
                             u.role === 'admin' ? 'bg-amber-950/50 text-amber-400 border border-amber-500/30' : 'bg-blue-950/50 text-blue-400 border border-blue-500/30'
                           }`}>{u.role}</span>
                         )}
@@ -591,15 +692,26 @@ export default function Admin() {
                           </div>
                         ) : (
                           <div className="flex items-center gap-1 justify-end">
+                            {u.role === 'pending' && canActOnTarget && (
+                              <button
+                                onClick={() => approveMutation.mutate(u.id)}
+                                disabled={approveMutation.isPending}
+                                className="p-1 px-2 flex items-center gap-1.5 rounded bg-emerald-950/40 text-emerald-400 hover:bg-emerald-900/40 border border-emerald-500/20 mr-1 transition-colors font-mono text-[10px] uppercase font-bold tracking-wider"
+                                title="Approve user"
+                              >
+                                {approveMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                                Approve
+                              </button>
+                            )}
                             <button
-                              onClick={() => canActOnTarget ? setEditingUser(u) : undefined}
-                              disabled={!canActOnTarget}
+                              onClick={() => canEditTarget ? setEditingUser(u) : undefined}
+                              disabled={!canEditTarget}
                               className={`p-1.5 rounded transition-colors ${
-                                canActOnTarget
+                                canEditTarget
                                   ? 'hover:bg-cyan-950/30 text-gray-500 hover:text-cyan-400 cursor-pointer'
                                   : 'text-gray-700 cursor-not-allowed opacity-40'
                               }`}
-                              title={canActOnTarget ? 'Edit user' : 'You do not have permission to modify another Admin.'}
+                              title={canEditTarget ? 'Edit user' : 'You do not have permission to modify another Admin.'}
                             >
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
@@ -632,6 +744,7 @@ export default function Admin() {
       {/* ═══════════════════════════════════════════════════════════════════════════
           WORKSPACE SETTINGS — Admin-only global configuration
           ═══════════════════════════════════════════════════════════════════════════ */}
+      {viewerIsSuperAdmin && (
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -733,6 +846,25 @@ export default function Admin() {
             </div>
             <div className="space-y-3">
               <Toggle
+                enabled={wsForm.ENABLE_SIGNUP !== 'false'}
+                onToggle={() => setWsForm({ ...wsForm, ENABLE_SIGNUP: wsForm.ENABLE_SIGNUP === 'false' ? 'true' : 'false' })}
+                label="Enable New Sign Ups"
+              />
+              <div className="pt-2">
+                <label className="block text-xs font-medium text-gray-400 mb-1">Default Role for New Sign Ups</label>
+                <select 
+                  value={wsForm.DEFAULT_NEW_USER_ROLE || 'pending'} 
+                  onChange={(e) => setWsForm({ ...wsForm, DEFAULT_NEW_USER_ROLE: e.target.value })} 
+                  className={inputClass}
+                >
+                  <option value="pending">Pending (Requires Approval)</option>
+                  <option value="user">User (Auto-Approved)</option>
+                </select>
+                <p className="text-[10px] text-gray-600 font-mono leading-relaxed mt-2">
+                  Controls the gatekeeper flow for all incoming sign-ups.
+                </p>
+              </div>
+              <Toggle
                 enabled={wsForm.STRICT_JSON_MODE === 'true'}
                 onToggle={() => setWsForm({ ...wsForm, STRICT_JSON_MODE: wsForm.STRICT_JSON_MODE === 'true' ? 'false' : 'true' })}
                 label="Strict JSON Mode"
@@ -759,10 +891,11 @@ export default function Admin() {
             </p>
             <textarea value={wsForm.PERSONALITY || ''} onChange={(e) => setWsForm({ ...wsForm, PERSONALITY: e.target.value })}
               placeholder="e.g. Respond concisely in bullet points. Focus on Python and DevOps tasks."
-              rows={6} className={`${inputClass} resize-none`} />
+              className={`${inputClass} min-h-[80px]`} />
           </div>
         </div>
       </div>
+      )}
 
       {/* Edit User Modal */}
       {editingUser && currentUser && (
