@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useReducer } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Loader2, Bird, Check, Copy, AlertTriangle, X, Wrench, ChevronDown, ChevronUp, Zap, Bot, GripVertical, Flag, Plus } from 'lucide-react';
+import { Trash2, Loader2, Bird, Check, Copy, AlertTriangle, X, Wrench, ChevronDown, ChevronUp, Zap, Bot, GripVertical, Flag, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -1012,6 +1012,31 @@ function ToolsUsedHeader({ tools }: { tools: ToolCallSummaryItem[] }) {
   );
 }
 
+function VersionSwitcher({ current, total, onPrev, onNext }: { current: number; total: number; onPrev: () => void; onNext: () => void }) {
+  if (total <= 1) return null;
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-[10px] font-mono text-gray-500">
+      <button
+        onClick={(e) => { e.stopPropagation(); onPrev(); }}
+        disabled={current === 1}
+        className="hover:text-cyan-400 disabled:opacity-30 disabled:hover:text-gray-500 transition-colors"
+      >
+        <ChevronLeft className="w-3 h-3" />
+      </button>
+      <span className="min-w-[24px] text-center font-bold tracking-tight text-gray-400">
+        {current} <span className="text-gray-600">/</span> {total}
+      </span>
+      <button
+        onClick={(e) => { e.stopPropagation(); onNext(); }}
+        disabled={current === total}
+        className="hover:text-cyan-400 disabled:opacity-30 disabled:hover:text-gray-500 transition-colors"
+      >
+        <ChevronRight className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
 // ── Tool Activity Pill ────────────────────────────────────────────────────────
 // Shown inline while the agent is executing a tool call. Fades in with a subtle
 // pulse so users know the AI is accessing a local capability.
@@ -1741,6 +1766,15 @@ export default function Chat() {
     }
   };
 
+  const handleSwitchVersion = async (messageId: string) => {
+    try {
+      await apiFetch(`/api/sessions/${currentSessionId}/messages/${messageId}/activate`, { method: 'POST' });
+      queryClient.invalidateQueries({ queryKey: ['session', currentSessionId] });
+    } catch (e) {
+      console.error('[SwitchVersion] Failed:', e);
+    }
+  };
+
   // Quick action handler: auto-create session if needed, then send deterministically
   const sendQuickAction = async (prompt: string) => {
     if (isStreaming) return;
@@ -1786,7 +1820,7 @@ export default function Chat() {
   };
 
   const allMessages = currentSession?.messages || [];
-  const displayMessages = [...allMessages];
+  const displayMessages = allMessages.filter((m: any) => m.isActive === 1 || m.id === 'streaming');
   // Show the streaming placeholder whenever the agent is active — even before
   // text starts arriving — so the stage / tool pill has somewhere to render.
   if (isStreaming || activeStage || activeToolCall) {
@@ -2185,29 +2219,43 @@ export default function Chat() {
                                   </div>
                                 )}
  
-                                {/* Assistant Action Bar (visible on hover) */}
-                                {!isStreamingMsg && msg.role === 'assistant' && !isApprovalCard && (
-                                  <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(cleaned);
-                                      }}
-                                      title="Copy message"
-                                      className="p-1.5 rounded hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
-                                    >
-                                      <Copy className="w-3.5 h-3.5" />
-                                    </button>
-                                    {index === allMessages.length - 1 && (
-                                      <button
-                                        onClick={() => handleRegenerate(msg.id)}
-                                        title="Regenerate response"
-                                        className="p-1.5 rounded hover:bg-white/5 text-gray-500 hover:text-violet-400 transition-colors"
-                                      >
-                                        <Zap className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
+                                 {/* Assistant Action Bar (visible on hover) */}
+                                 {!isStreamingMsg && msg.role === 'assistant' && !isApprovalCard && (() => {
+                                   const siblings = allMessages.filter(m => m.parentId === msg.parentId && m.role === 'assistant');
+                                   const currentIndex = siblings.findIndex(s => s.id === msg.id) + 1;
+                                   const totalVersions = siblings.length;
+
+                                   return (
+                                     <div className="flex items-center gap-3 mt-2">
+                                       <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                         <VersionSwitcher
+                                           current={currentIndex}
+                                           total={totalVersions}
+                                           onPrev={() => handleSwitchVersion(siblings[currentIndex - 2].id)}
+                                           onNext={() => handleSwitchVersion(siblings[currentIndex].id)}
+                                         />
+                                         <button
+                                           onClick={() => {
+                                             navigator.clipboard.writeText(cleaned);
+                                           }}
+                                           title="Copy message"
+                                           className="p-1.5 rounded hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
+                                         >
+                                           <Copy className="w-3.5 h-3.5" />
+                                         </button>
+                                         {index === displayMessages.length - 1 && (
+                                           <button
+                                             onClick={() => handleRegenerate(msg.id)}
+                                             title="Regenerate response"
+                                             className="p-1.5 rounded hover:bg-white/5 text-gray-500 hover:text-violet-400 transition-colors"
+                                           >
+                                             <Zap className="w-3.5 h-3.5" />
+                                           </button>
+                                         )}
+                                       </div>
+                                     </div>
+                                   );
+                                 })()}
                               </div>
                           );
                         })()

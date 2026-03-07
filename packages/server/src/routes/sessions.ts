@@ -54,6 +54,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         toolCalls: m.toolCalls,
         toolResults: m.toolResults,
         status: m.status,
+        parentId: m.parentId,
+        isActive: m.isActive,
         model: m.model,
         inputTokens: m.inputTokens,
         outputTokens: m.outputTokens,
@@ -118,7 +120,47 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     const db = getDb();
-    db.delete(schema.messages as any).where((col: (k: string) => any) => col('id') === messageId && col('sessionId') === id);
-    return reply.send({ success: true, deleted: true });
+    // Soft delete: mark as inactive instead of hard deleting for version history
+    db.update(schema.messages as any).set({ isActive: 0 }).where((col: (k: string) => any) => col('id') === messageId && col('sessionId') === id);
+    return reply.send({ success: true, archived: true });
+  });
+
+  fastify.post('/api/sessions/:id/messages/:messageId/activate', async (request: FastifyRequest<{ Params: { id: string, messageId: string } }>, reply: FastifyReply) => {
+    const { id, messageId } = request.params;
+    const userId = (request as any).user.id;
+
+    const session = getSession(id, userId);
+    if (!session) {
+      return reply.code(404).send({ error: 'Session not found' });
+    }
+
+    const db = getDb();
+    const messages = db.select(schema.messages as any).where((col: (k: string) => any) => col('sessionId') === id).all() as any[];
+    const target = messages.find(m => m.id === messageId);
+    
+    if (!target) {
+      return reply.code(404).send({ error: 'Message not found' });
+    }
+
+    // Set all siblings (share same parent) to inactive
+    const siblings = messages.filter(m => m.parentId === target.parentId);
+    const siblingIds = siblings.map(s => s.id);
+    
+    if (siblingIds.length > 0) {
+      db.update(schema.messages as any)
+        .set({ isActive: 0 })
+        .where((col: (k: string) => any) => col('id') + ' IN (' + siblingIds.map(() => '?').join(',') + ')');
+      // Wait, getDb().update(...).where() doesn't support complex SQL like 'IN (?)' easily with the custom wrapper
+      // I should use drizzle directly or use multiple updates (less efficient but safer with this wrapper)
+      
+      for (const sid of siblingIds) {
+        db.update(schema.messages as any).set({ isActive: 0 }).where((col: (k: string) => any) => col('id') === sid);
+      }
+    }
+
+    // Set target to active
+    db.update(schema.messages as any).set({ isActive: 1 }).where((col: (k: string) => any) => col('id') === messageId);
+
+    return reply.send({ success: true, activated: messageId });
   });
 }

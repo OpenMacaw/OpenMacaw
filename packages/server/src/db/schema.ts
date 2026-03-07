@@ -96,6 +96,8 @@ export const messages = sqliteTable('messages', {
   model: text('model'),
   inputTokens: integer('input_tokens'),
   outputTokens: integer('output_tokens'),
+  parentId: text('parent_id'),
+  isActive: integer('is_active').notNull().default(1),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 

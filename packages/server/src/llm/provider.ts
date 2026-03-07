@@ -7,6 +7,7 @@ export interface ToolDefinition {
 export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  id?: string;
   toolCallId?: string;
   toolName?: string;
   toolCalls?: string;

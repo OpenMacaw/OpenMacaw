@@ -155,6 +155,8 @@ const SCHEMA_SQL = `
     model TEXT,
     input_tokens INTEGER,
     output_tokens INTEGER,
+    parent_id TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL
   );
 
@@ -356,6 +358,13 @@ export function initDatabase(): void {
     sqlite.exec("ALTER TABLE users ADD COLUMN profile_image_url TEXT");
     console.log('[DB Migration] Phase 76: profile_image_url column added.');
   } catch (e) { /* column already exists */ }
+
+  // ── Phase 7: Response Navigation Migration ──────────────────────────────
+  try {
+    sqlite.exec("ALTER TABLE messages ADD COLUMN parent_id TEXT");
+    sqlite.exec("ALTER TABLE messages ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1");
+    console.log('[DB Migration] Phase 7: parent_id and is_active columns added.');
+  } catch (e) { /* columns already exist */ }
 
   drizzleDb = drizzle(sqlite, { schema: schemaMappings });
 

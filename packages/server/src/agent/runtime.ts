@@ -80,9 +80,10 @@ export const activeStreams = new Set<AbortController>();
 export class AgentRuntime {
   private config: AgentConfig;
   private eventHandler: EventHandler;
-  private messages: Message[];
+  private messages: Message[] = [];
   private stepCount = 0;
   private maxSteps: number;
+  private lastMessageId: string | null = null;
 
   // ── Task 4: Safety Brake state ────────────────────────────────────────────
   /** Timestamps (ms) of every tool call fired in the current run() turn. */
@@ -110,7 +111,11 @@ export class AgentRuntime {
       return;
     }
 
-    const raw: Message[] = history.map(msg => ({
+    // Filter for active branch only
+    const activeHistory = history.filter(msg => msg.isActive === 1);
+
+    const raw: Message[] = activeHistory.map(msg => ({
+      id: msg.id,
       role: msg.role as Message['role'],
       content: msg.content,
       toolCalls: msg.toolCalls || undefined,
@@ -137,9 +142,13 @@ export class AgentRuntime {
     // Ensure system prompt is at the top (always present — even with no personality).
     if (this.messages.length === 0 || this.messages[0].role !== 'system') {
       this.messages.unshift({ role: 'system', content: buildSystemPrompt(this.config.personality) });
+    } else {
+      // Set lastMessageId from the last message of the loaded history
+      const lastMsg = activeHistory[activeHistory.length - 1];
+      if (lastMsg) this.lastMessageId = lastMsg.id;
     }
 
-    console.log(`[Agent] Loaded ${history.length} messages from history (${this.messages.length} after filtering)`);
+    console.log(`[Agent] Loaded ${history.length} messages (${activeHistory.length} active) from history`);
   }
 
   async run(userMessage?: string): Promise<void> {
@@ -558,11 +567,14 @@ export class AgentRuntime {
     usage?: { inputTokens: number; outputTokens: number },
     toolCalls?: string,
     toolCallId?: string,
-    status?: string,   // ── State machine status for proposal messages
-  ): Promise<void> {
+    status?: string,
+    parentId?: string | null,
+    isActive = 1
+  ): Promise<string> {
     console.log('[Agent] Saving message:', role, 'content length:', content.length);
     const db = getDrizzleDb();
     const messageId = nanoid();
+    const pid = parentId === undefined ? this.lastMessageId : parentId;
 
     try {
       await db.insert(schema.messages).values({
@@ -573,17 +585,19 @@ export class AgentRuntime {
         toolCalls,
         toolCallId,
         status,
+        parentId: pid,
+        isActive,
         model: role === 'assistant' ? this.config.model : undefined,
         inputTokens: usage?.inputTokens,
         outputTokens: usage?.outputTokens,
         createdAt: new Date(),
       });
-      console.log('[Agent] Message saved:', messageId);
+      console.log(`[Agent] Message saved: ${messageId} (parent: ${pid})`);
+      this.lastMessageId = messageId;
+      return messageId;
     } catch (e) {
-      // A FK constraint here almost always means the session was deleted while
-      // the agent was mid-flight (e.g. during a Discord approval reaction wait).
-      // Log it clearly instead of crashing the entire pipeline run.
-      console.error('[Agent] Failed to save message (session may have been deleted):', e instanceof Error ? e.message : e);
+      console.error('[Agent] Failed to save message:', e instanceof Error ? e.message : e);
+      return messageId; // Return something even on failure
     }
   }
 
