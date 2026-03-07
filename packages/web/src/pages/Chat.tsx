@@ -1771,7 +1771,7 @@ export default function Chat() {
     <div className="flex h-full">
       <div className="flex-1 flex flex-col min-w-0 bg-black relative">
         {currentSessionId && (
-          <div className="h-14 border-b border-white/5 flex items-center justify-between px-4 shrink-0 bg-zinc-950 z-10 backdrop-blur-sm relative">
+          <div className="h-14 border-b border-white/5 flex items-center justify-between px-4 pr-12 shrink-0 bg-zinc-950 z-10 backdrop-blur-sm relative">
             <div className="flex items-center gap-2">
               <span className="font-semibold text-gray-200">{currentSession?.title || 'Chat'}</span>
             </div>

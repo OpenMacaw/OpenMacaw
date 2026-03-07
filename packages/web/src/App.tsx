@@ -6,7 +6,7 @@ import {
   MessageSquare, Server, Activity, Settings, Bird,
   ChevronLeft, ChevronRight, Bot, Plus, X, Save, Loader2, Menu, Moon, Sun, PenSquare,
   ShieldCheck, Settings2, AlertOctagon, Copy, ChevronDown, ChevronUp, Cpu, Clock, Hash, Workflow, BookMarked, Trash2, LogOut, User as UserIcon, ShieldAlert, CheckCircle2, Circle, Crosshair, Target,
-  MoreHorizontal, Pin, Download, Edit2, FolderClosed, FolderOpen, PanelLeftClose, PanelLeftOpen
+  MoreHorizontal, Pin, Download, Edit2, FolderClosed, FolderOpen, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen
 } from 'lucide-react';
 import { apiFetch } from './api';
 import { ServerPermissionDrawer } from './components/ServerPermissionDrawer';
@@ -300,6 +300,24 @@ function App() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const [isInspectorOpen, setIsInspectorOpen] = useState(() => {
+    try {
+      const saved = localStorage.getItem('openmacaw:inspector-open');
+      if (saved) return JSON.parse(saved);
+    } catch { }
+    return true;
+  });
+
+  const toggleInspector = () => {
+    setIsInspectorOpen((prev: boolean) => {
+      const next = !prev;
+      localStorage.setItem('openmacaw:inspector-open', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const isChatRoute = location.pathname === '/' || location.pathname.startsWith('/chat');
 
   // ── Modals & Dialogues Keyboard Bindings ──
   useEffect(() => {
@@ -925,358 +943,380 @@ function App() {
         {/* ── Middle Pane ── */}
         <main className="flex-1 flex flex-col min-w-0 bg-black z-0 relative pt-12 lg:pt-0 delay-150 duration-300 transition-all">
           <Outlet />
+
+          {/* Open Inspector Button (Desktop only, when closed, on Chat routes) */}
+          {!isInspectorOpen && isChatRoute && (
+            <button
+              onClick={toggleInspector}
+              className="hidden lg:flex fixed top-3 right-4 z-20 p-1.5 rounded-md text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors border border-white/5 bg-black/50 backdrop-blur-sm shadow-lg"
+              title="Open Inspector"
+            >
+              <PanelRightOpen className="w-4 h-4" />
+            </button>
+          )}
         </main>
 
         {/* ── Right Pane: Glass Box Inspector ── */}
-        <aside className="w-80 hidden lg:flex flex-col bg-zinc-950 border-l border-white/5 shrink-0 z-10">
-          {/* Inspector Header */}
-          <div className="h-12 flex items-center justify-between px-4 border-b border-white/5 bg-black">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-gray-500">
-                {pipelineState ? 'Mission Control' : 'Inspector'}
-              </span>
-              {pipelineState?.status === 'running' && (
-                <span className="flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                  <span className="text-[9px] font-mono text-cyan-400 animate-pulse">LIVE</span>
-                </span>
-              )}
-            </div>
-            {pipelineState ? (
-              <Target className={`w-3.5 h-3.5 ${
-                pipelineState.status === 'running' ? 'text-cyan-400 animate-spin' :
-                pipelineState.status === 'done' ? 'text-green-400' : 'text-rose-400'
-              }`} />
-            ) : (
-              <Activity className="w-3.5 h-3.5 text-gray-500" />
-            )}
-          </div>
-
-          {/* Top Section: Active Session State */}
-          <div className="px-4 py-3 border-b border-white/5 space-y-1.5 bg-black/50">
-            <div className="flex items-center justify-between">
-              <span className="text-[9px] font-mono uppercase tracking-widest text-gray-600">Session State</span>
-              <Cpu className="w-3 h-3 text-gray-600" />
-            </div>
-            <div className="flex items-center justify-between text-[11px] font-mono">
-              <span className="text-gray-500">Model</span>
-              <span className="text-cyan-400 truncate max-w-[140px]">{sessionInfo?.model || '—'}</span>
-            </div>
-            <div className="flex items-center justify-between text-[11px] font-mono">
-              <span className="text-gray-500">Session</span>
-              <button
-                onClick={() => {
-                  if (sessionInfo?.sessionId) {
-                    navigator.clipboard.writeText(sessionInfo.sessionId);
-                  }
-                }}
-                className="flex items-center gap-1 text-gray-400 hover:text-cyan-400 transition-colors group"
-                title="Click to copy full ID"
-              >
-                <span className="truncate max-w-[100px] text-[11px]">{sessionInfo?.sessionId?.slice(0, 12) || '—'}…</span>
-                <Copy className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </button>
-            </div>
-          </div>
-
-          {/* Middle Section: Pipeline Roadmap OR Live Event Stream */}
-          <div
-            ref={inspectorRef}
-            className="flex-1 overflow-y-auto selection:bg-cyan-900/40"
-          >
-            <AnimatePresence mode="wait">
-              {pipelineState ? (
-                /* ── Mission Control: Pipeline Roadmap ── */
-                <motion.div
-                  key="pipeline-roadmap"
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -12 }}
-                  transition={{ duration: 0.3 }}
-                  className="p-3 space-y-3"
-                >
-                  {/* Goal Header */}
-                  <div className={`rounded-lg p-3 border ${
-                    pipelineState.status === 'running'
-                      ? 'bg-violet-950/30 border-violet-500/20'
-                      : pipelineState.status === 'done'
-                        ? 'bg-green-950/30 border-green-500/20'
-                        : 'bg-rose-950/30 border-rose-500/20'
-                  }`}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <Crosshair className={`w-3.5 h-3.5 ${
-                        pipelineState.status === 'running' ? 'text-violet-400' :
+        <AnimatePresence mode="wait">
+          {isInspectorOpen && isChatRoute && (
+            <motion.aside
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 320, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.3, ease: 'easeInOut' }}
+              className="hidden lg:flex flex-col bg-zinc-950 border-l border-white/5 shrink-0 z-10 overflow-hidden"
+            >
+              {/* Inspector Header */}
+              <div className="h-12 flex items-center justify-between px-4 border-b border-white/5 bg-black shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-gray-500">
+                    {pipelineState ? 'Mission Control' : 'Inspector'}
+                  </span>
+                  {pipelineState?.status === 'running' && (
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                      <span className="text-[9px] font-mono text-cyan-400 animate-pulse">LIVE</span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {pipelineState ? (
+                    <Target className={`w-3.5 h-3.5 ${pipelineState.status === 'running' ? 'text-cyan-400 animate-spin' :
                         pipelineState.status === 'done' ? 'text-green-400' : 'text-rose-400'
                       }`} />
-                      <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500">
-                        {pipelineState.status === 'running' ? 'Active Goal' :
-                         pipelineState.status === 'done' ? 'Completed' : 'Cancelled'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-300 leading-relaxed line-clamp-3">
-                      {pipelineState.goal || 'Autonomous pipeline'}
-                    </p>
-                  </div>
+                  ) : (
+                    <Activity className="w-3.5 h-3.5 text-gray-500" />
+                  )}
+                  <button
+                    onClick={toggleInspector}
+                    className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+                    title="Close Inspector"
+                  >
+                    <PanelRightClose className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
 
-                  {/* Step Roadmap */}
-                  <div className="space-y-0.5">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[9px] font-mono uppercase tracking-widest text-gray-600">Pipeline Roadmap</span>
-                      <span className="text-[9px] font-mono text-gray-600">
-                        {Object.values(pipelineState.stepProgress).filter(s => s === 'done').length}/{pipelineState.plan.length}
-                      </span>
-                    </div>
+              {/* Top Section: Active Session State */}
+              <div className="px-4 py-3 border-b border-white/5 space-y-1.5 bg-black/50 shrink-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-mono uppercase tracking-widest text-gray-600">Session State</span>
+                  <Cpu className="w-3 h-3 text-gray-600" />
+                </div>
+                <div className="flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-gray-500">Model</span>
+                  <span className="text-cyan-400 truncate max-w-[140px]">{sessionInfo?.model || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-gray-500">Session</span>
+                  <button
+                    onClick={() => {
+                      if (sessionInfo?.sessionId) {
+                        navigator.clipboard.writeText(sessionInfo.sessionId);
+                      }
+                    }}
+                    className="flex items-center gap-1 text-gray-400 hover:text-cyan-400 transition-colors group"
+                    title="Click to copy full ID"
+                  >
+                    <span className="truncate max-w-[100px] text-[11px]">{sessionInfo?.sessionId?.slice(0, 12) || '—'}…</span>
+                    <Copy className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                </div>
+              </div>
 
-                    {pipelineState.plan.map((step, idx) => {
-                      const status = pipelineState.stepProgress[idx] || 'pending';
-                      const isActive = status === 'running';
-                      const isDone = status === 'done';
-                      const isError = status === 'error';
-                      const isExpanded = expandedSteps.has(idx);
-
-                      return (
-                        <motion.div
-                          key={step.id || idx}
-                          layout
-                          initial={{ opacity: 0, x: -8 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ duration: 0.2, delay: idx * 0.05 }}
-                        >
-                          <button
-                            onClick={() => {
-                              if (isDone || isError) {
-                                setExpandedSteps(prev => {
-                                  const next = new Set(prev);
-                                  next.has(idx) ? next.delete(idx) : next.add(idx);
-                                  return next;
-                                });
-                              }
-                            }}
-                            className={`w-full flex items-start gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-300 ${
-                              isActive
-                                ? 'bg-cyan-950/30 border border-cyan-500/20'
-                                : isDone
-                                  ? 'bg-white/[0.02] border border-transparent hover:bg-white/[0.04] cursor-pointer'
-                                  : isError
-                                    ? 'bg-rose-950/20 border border-rose-500/10 hover:bg-rose-950/30 cursor-pointer'
-                                    : 'bg-transparent border border-transparent opacity-50'
-                            }`}
-                          >
-                            {/* Status Icon with AnimatePresence */}
-                            <div className="w-4 h-4 mt-0.5 shrink-0 flex items-center justify-center">
-                              <AnimatePresence mode="wait">
-                                {isDone ? (
-                                  <motion.div
-                                    key={`done-${idx}`}
-                                    initial={{ scale: 0, rotate: -90 }}
-                                    animate={{ scale: 1, rotate: 0 }}
-                                    transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                                  >
-                                    <CheckCircle2 className="w-4 h-4 text-green-500" />
-                                  </motion.div>
-                                ) : isActive ? (
-                                  <motion.div
-                                    key={`active-${idx}`}
-                                    initial={{ scale: 0 }}
-                                    animate={{ scale: 1 }}
-                                    className="relative"
-                                  >
-                                    <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
-                                  </motion.div>
-                                ) : isError ? (
-                                  <motion.div
-                                    key={`error-${idx}`}
-                                    initial={{ scale: 0 }}
-                                    animate={{ scale: 1 }}
-                                  >
-                                    <X className="w-4 h-4 text-rose-400" />
-                                  </motion.div>
-                                ) : (
-                                  <Circle className="w-3.5 h-3.5 text-gray-700" />
-                                )}
-                              </AnimatePresence>
-                            </div>
-
-                            {/* Step Content */}
-                            <div className="flex-1 min-w-0">
-                              <span className={`text-[11px] leading-relaxed font-mono transition-colors duration-500 ${
-                                isActive ? 'text-cyan-400' :
-                                isDone ? 'text-zinc-500' :
-                                isError ? 'text-rose-400' :
-                                'text-gray-600'
-                              }`}>
-                                {step.description}
-                              </span>
-
-                              {/* Active step: show current tool badge */}
-                              {isActive && pipelineState.currentTool && (
-                                <motion.div
-                                  initial={{ opacity: 0, y: -4 }}
-                                  animate={{ opacity: 1, y: 0 }}
-                                  className="mt-1 flex items-center gap-1"
-                                >
-                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-950/50 text-cyan-500 font-mono border border-cyan-500/20">
-                                    {pipelineState.currentTool.includes('__')
-                                      ? pipelineState.currentTool.split('__')[1]
-                                      : pipelineState.currentTool}
-                                  </span>
-                                </motion.div>
-                              )}
-
-                              {/* Expanded detail for completed/error steps */}
-                              <AnimatePresence>
-                                {isExpanded && (
-                                  <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: 'auto', opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    transition={{ duration: 0.2 }}
-                                    className="overflow-hidden"
-                                  >
-                                    <div className="mt-1.5 pt-1.5 border-t border-white/5 space-y-1">
-                                      {step.tool && (
-                                        <div className="flex items-center gap-1">
-                                          <span className="text-[9px] text-gray-600 font-mono">Tool:</span>
-                                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-950/50 text-violet-400 font-mono border border-violet-500/20">
-                                            {step.tool}
-                                          </span>
-                                        </div>
-                                      )}
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-[9px] text-gray-600 font-mono">Status:</span>
-                                        <span className={`text-[9px] font-mono ${
-                                          isDone ? 'text-green-500' : 'text-rose-400'
-                                        }`}>
-                                          {isDone ? 'Completed ✓' : 'Failed ✗'}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </div>
-
-                            {/* Step number */}
-                            <span className={`text-[9px] font-mono shrink-0 mt-0.5 ${
-                              isActive ? 'text-cyan-500' :
-                              isDone ? 'text-zinc-600' : 'text-gray-700'
-                            }`}>
-                              {idx + 1}
-                            </span>
-                          </button>
-                        </motion.div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Pipeline Status Footer */}
-                  {pipelineState.status !== 'running' && (
+              {/* Middle Section: Pipeline Roadmap OR Live Event Stream */}
+              <div
+                ref={inspectorRef}
+                className="flex-1 overflow-y-auto selection:bg-cyan-900/40 w-80"
+              >
+                <AnimatePresence mode="wait">
+                  {pipelineState ? (
+                    /* ── Mission Control: Pipeline Roadmap ── */
                     <motion.div
+                      key="pipeline-roadmap"
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -12 }}
+                      transition={{ duration: 0.3 }}
+                      className="p-3 space-y-3"
+                    >
+                      {/* Goal Header */}
+                      <div className={`rounded-lg p-3 border ${pipelineState.status === 'running'
+                          ? 'bg-violet-950/30 border-violet-500/20'
+                          : pipelineState.status === 'done'
+                            ? 'bg-green-950/30 border-green-500/20'
+                            : 'bg-rose-950/30 border-rose-500/20'
+                        }`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <Crosshair className={`w-3.5 h-3.5 ${pipelineState.status === 'running' ? 'text-violet-400' :
+                              pipelineState.status === 'done' ? 'text-green-400' : 'text-rose-400'
+                            }`} />
+                          <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500">
+                            {pipelineState.status === 'running' ? 'Active Goal' :
+                              pipelineState.status === 'done' ? 'Completed' : 'Cancelled'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-300 leading-relaxed line-clamp-3">
+                          {pipelineState.goal || 'Autonomous pipeline'}
+                        </p>
+                      </div>
+
+                      {/* Step Roadmap */}
+                      <div className="space-y-0.5">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[9px] font-mono uppercase tracking-widest text-gray-600">Pipeline Roadmap</span>
+                          <span className="text-[9px] font-mono text-gray-600">
+                            {Object.values(pipelineState.stepProgress).filter(s => s === 'done').length}/{pipelineState.plan.length}
+                          </span>
+                        </div>
+
+                        {pipelineState.plan.map((step, idx) => {
+                          const status = pipelineState.stepProgress[idx] || 'pending';
+                          const isActive = status === 'running';
+                          const isDone = status === 'done';
+                          const isError = status === 'error';
+                          const isExpanded = expandedSteps.has(idx);
+
+                          return (
+                            <motion.div
+                              key={step.id || idx}
+                              layout
+                              initial={{ opacity: 0, x: -8 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ duration: 0.2, delay: idx * 0.05 }}
+                            >
+                              <button
+                                onClick={() => {
+                                  if (isDone || isError) {
+                                    setExpandedSteps(prev => {
+                                      const next = new Set(prev);
+                                      next.has(idx) ? next.delete(idx) : next.add(idx);
+                                      return next;
+                                    });
+                                  }
+                                }}
+                                className={`w-full flex items-start gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-300 ${isActive
+                                    ? 'bg-cyan-950/30 border border-cyan-500/20'
+                                    : isDone
+                                      ? 'bg-white/[0.02] border border-transparent hover:bg-white/[0.04] cursor-pointer'
+                                      : isError
+                                        ? 'bg-rose-950/20 border border-rose-500/10 hover:bg-rose-950/30 cursor-pointer'
+                                        : 'bg-transparent border border-transparent opacity-50'
+                                  }`}
+                              >
+                                {/* Status Icon with AnimatePresence */}
+                                <div className="w-4 h-4 mt-0.5 shrink-0 flex items-center justify-center">
+                                  <AnimatePresence mode="wait">
+                                    {isDone ? (
+                                      <motion.div
+                                        key={`done-${idx}`}
+                                        initial={{ scale: 0, rotate: -90 }}
+                                        animate={{ scale: 1, rotate: 0 }}
+                                        transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                                      >
+                                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                      </motion.div>
+                                    ) : isActive ? (
+                                      <motion.div
+                                        key={`active-${idx}`}
+                                        initial={{ scale: 0 }}
+                                        animate={{ scale: 1 }}
+                                        className="relative"
+                                      >
+                                        <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+                                      </motion.div>
+                                    ) : isError ? (
+                                      <motion.div
+                                        key={`error-${idx}`}
+                                        initial={{ scale: 0 }}
+                                        animate={{ scale: 1 }}
+                                      >
+                                        <X className="w-4 h-4 text-rose-400" />
+                                      </motion.div>
+                                    ) : (
+                                      <Circle className="w-3.5 h-3.5 text-gray-700" />
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+
+                                {/* Step Content */}
+                                <div className="flex-1 min-w-0">
+                                  <span className={`text-[11px] leading-relaxed font-mono transition-colors duration-500 ${isActive ? 'text-cyan-400' :
+                                      isDone ? 'text-zinc-500' :
+                                        isError ? 'text-rose-400' :
+                                          'text-gray-600'
+                                    }`}>
+                                    {step.description}
+                                  </span>
+
+                                  {/* Active step: show current tool badge */}
+                                  {isActive && pipelineState.currentTool && (
+                                    <motion.div
+                                      initial={{ opacity: 0, y: -4 }}
+                                      animate={{ opacity: 1, y: 0 }}
+                                      className="mt-1 flex items-center gap-1"
+                                    >
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-950/50 text-cyan-500 font-mono border border-cyan-500/20">
+                                        {pipelineState.currentTool.includes('__')
+                                          ? pipelineState.currentTool.split('__')[1]
+                                          : pipelineState.currentTool}
+                                      </span>
+                                    </motion.div>
+                                  )}
+
+                                  {/* Expanded detail for completed/error steps */}
+                                  <AnimatePresence>
+                                    {isExpanded && (
+                                      <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.2 }}
+                                        className="overflow-hidden"
+                                      >
+                                        <div className="mt-1.5 pt-1.5 border-t border-white/5 space-y-1">
+                                          {step.tool && (
+                                            <div className="flex items-center gap-1">
+                                              <span className="text-[9px] text-gray-600 font-mono">Tool:</span>
+                                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-950/50 text-violet-400 font-mono border border-violet-500/20">
+                                                {step.tool}
+                                              </span>
+                                            </div>
+                                          )}
+                                          <div className="flex items-center gap-1">
+                                            <span className="text-[9px] text-gray-600 font-mono">Status:</span>
+                                            <span className={`text-[9px] font-mono ${isDone ? 'text-green-500' : 'text-rose-400'
+                                              }`}>
+                                              {isDone ? 'Completed ✓' : 'Failed ✗'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+
+                                {/* Step number */}
+                                <span className={`text-[9px] font-mono shrink-0 mt-0.5 ${isActive ? 'text-cyan-500' :
+                                    isDone ? 'text-zinc-600' : 'text-gray-700'
+                                  }`}>
+                                  {idx + 1}
+                                </span>
+                              </button>
+                            </motion.div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Pipeline Status Footer */}
+                      {pipelineState.status !== 'running' && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          className={`flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-mono uppercase tracking-wider ${pipelineState.status === 'done'
+                              ? 'bg-green-950/20 text-green-500 border border-green-500/10'
+                              : 'bg-rose-950/20 text-rose-500 border border-rose-500/10'
+                            }`}
+                        >
+                          {pipelineState.status === 'done' ? (
+                            <><CheckCircle2 className="w-3 h-3" /> Pipeline Complete</>
+                          ) : (
+                            <><X className="w-3 h-3" /> Pipeline Cancelled</>
+                          )}
+                        </motion.div>
+                      )}
+                    </motion.div>
+                  ) : (
+                    /* ── Default: Generic Log View ── */
+                    <motion.div
+                      key="log-view"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
-                      className={`flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-mono uppercase tracking-wider ${
-                        pipelineState.status === 'done'
-                          ? 'bg-green-950/20 text-green-500 border border-green-500/10'
-                          : 'bg-rose-950/20 text-rose-500 border border-rose-500/10'
-                      }`}
+                      exit={{ opacity: 0 }}
+                      className="p-3 font-mono text-[11px] text-gray-500 space-y-1.5 w-80"
                     >
-                      {pipelineState.status === 'done' ? (
-                        <><CheckCircle2 className="w-3 h-3" /> Pipeline Complete</>
+                      {executionLogs.length === 0 && inspectorEntries.length === 0 ? (
+                        <>
+                          <div className="flex gap-2">
+                            <span className="text-gray-600">[{new Date().toISOString().split('T')[1].split('.')[0]}]</span>
+                            <span className="text-cyan-700">SYSTEM_INIT</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="text-gray-600">[{new Date().toISOString().split('T')[1].split('.')[0]}]</span>
+                            <span className="text-gray-400">Waiting for agent activity...</span>
+                          </div>
+                        </>
                       ) : (
-                        <><X className="w-3 h-3" /> Pipeline Cancelled</>
+                        <>
+                          {executionLogs.map(log => (
+                            <div key={log.id} className="flex gap-2 leading-relaxed">
+                              <span className="text-gray-600 shrink-0">[{log.time}]</span>
+                              <span className={`${log.type === 'success' ? 'text-green-500' :
+                                  log.type === 'error' ? 'text-red-500' :
+                                    'text-cyan-400 animate-pulse'
+                                }`}>{log.message}</span>
+                            </div>
+                          ))}
+                          {inspectorEntries.map(entry => (
+                            <div key={entry.id} className="border border-white/5 rounded bg-black/30">
+                              <button
+                                onClick={() => setExpandedEntries(prev => {
+                                  const next = new Set(prev);
+                                  next.has(entry.id) ? next.delete(entry.id) : next.add(entry.id);
+                                  return next;
+                                })}
+                                className="w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-white/[0.03] transition-colors"
+                              >
+                                {expandedEntries.has(entry.id) ? (
+                                  <ChevronUp className="w-3 h-3 text-gray-600 shrink-0" />
+                                ) : (
+                                  <ChevronDown className="w-3 h-3 text-gray-600 shrink-0" />
+                                )}
+                                <span className="text-gray-600 shrink-0">[{entry.time}]</span>
+                                <span className="text-amber-400 truncate">{entry.message}</span>
+                              </button>
+                              {expandedEntries.has(entry.id) && entry.jsonPayload && (
+                                <pre className="px-3 py-2 text-[10px] text-gray-400 border-t border-white/5 overflow-x-auto bg-black/50 max-h-40 overflow-y-auto">
+                                  {JSON.stringify(entry.jsonPayload, null, 2)}
+                                </pre>
+                              )}
+                            </div>
+                          ))}
+                        </>
                       )}
                     </motion.div>
                   )}
-                </motion.div>
-              ) : (
-                /* ── Default: Generic Log View ── */
-                <motion.div
-                  key="log-view"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="p-3 font-mono text-[11px] text-gray-500 space-y-1.5"
-                >
-                  {executionLogs.length === 0 && inspectorEntries.length === 0 ? (
-                    <>
-                      <div className="flex gap-2">
-                        <span className="text-gray-600">[{new Date().toISOString().split('T')[1].split('.')[0]}]</span>
-                        <span className="text-cyan-700">SYSTEM_INIT</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="text-gray-600">[{new Date().toISOString().split('T')[1].split('.')[0]}]</span>
-                        <span className="text-gray-400">Waiting for agent activity...</span>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      {executionLogs.map(log => (
-                        <div key={log.id} className="flex gap-2 leading-relaxed">
-                          <span className="text-gray-600 shrink-0">[{log.time}]</span>
-                          <span className={`${log.type === 'success' ? 'text-green-500' :
-                              log.type === 'error' ? 'text-red-500' :
-                                'text-cyan-400 animate-pulse'
-                            }`}>{log.message}</span>
-                        </div>
-                      ))}
-                      {inspectorEntries.map(entry => (
-                        <div key={entry.id} className="border border-white/5 rounded bg-black/30">
-                          <button
-                            onClick={() => setExpandedEntries(prev => {
-                              const next = new Set(prev);
-                              next.has(entry.id) ? next.delete(entry.id) : next.add(entry.id);
-                              return next;
-                            })}
-                            className="w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-white/[0.03] transition-colors"
-                          >
-                            {expandedEntries.has(entry.id) ? (
-                              <ChevronUp className="w-3 h-3 text-gray-600 shrink-0" />
-                            ) : (
-                              <ChevronDown className="w-3 h-3 text-gray-600 shrink-0" />
-                            )}
-                            <span className="text-gray-600 shrink-0">[{entry.time}]</span>
-                            <span className="text-amber-400 truncate">{entry.message}</span>
-                          </button>
-                          {expandedEntries.has(entry.id) && entry.jsonPayload && (
-                            <pre className="px-3 py-2 text-[10px] text-gray-400 border-t border-white/5 overflow-x-auto bg-black/50 max-h-40 overflow-y-auto">
-                              {JSON.stringify(entry.jsonPayload, null, 2)}
-                            </pre>
-                          )}
-                        </div>
-                      ))}
-                    </>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+                </AnimatePresence>
+              </div>
 
-          {/* Bottom Section: Telemetry Footer */}
-          <div className="px-4 py-3 border-t border-white/5 bg-black/80 space-y-1.5 shrink-0">
-            <div className="flex items-center justify-between">
-              <span className="text-[9px] font-mono uppercase tracking-widest text-gray-600">Telemetry</span>
-              <Hash className="w-3 h-3 text-gray-600" />
-            </div>
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-gray-500 font-mono flex items-center gap-1"><Cpu className="w-3 h-3" /> Total Tokens</span>
-              <span className="font-mono text-cyan-400 font-bold">
-                {telemetry ? `${(telemetry.inputTokens + telemetry.outputTokens).toLocaleString()}` : '—'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-gray-500 font-mono text-[10px]">↳ In / Out</span>
-              <span className="font-mono text-cyan-400/70 text-[10px]">
-                {telemetry ? `${telemetry.inputTokens.toLocaleString()} / ${telemetry.outputTokens.toLocaleString()}` : '— / —'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-gray-500 font-mono flex items-center gap-1"><Clock className="w-3 h-3" /> Response Time</span>
-              <span className="font-mono text-cyan-400 font-bold">
-                {telemetry?.responseTimeMs ? `${(telemetry.responseTimeMs / 1000).toFixed(2)}s` : '—'}
-              </span>
-            </div>
-          </div>
-        </aside>
+              {/* Bottom Section: Telemetry Footer */}
+              <div className="px-4 py-3 border-t border-white/5 bg-black/80 space-y-1.5 shrink-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-mono uppercase tracking-widest text-gray-600">Telemetry</span>
+                  <Hash className="w-3 h-3 text-gray-600" />
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-500 font-mono flex items-center gap-1"><Cpu className="w-3 h-3" /> Total Tokens</span>
+                  <span className="font-mono text-cyan-400 font-bold">
+                    {telemetry ? `${(telemetry.inputTokens + telemetry.outputTokens).toLocaleString()}` : '—'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-500 font-mono text-[10px]">↳ In / Out</span>
+                  <span className="font-mono text-cyan-400/70 text-[10px]">
+                    {telemetry ? `${telemetry.inputTokens.toLocaleString()} / ${telemetry.outputTokens.toLocaleString()}` : '— / —'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-500 font-mono flex items-center gap-1"><Clock className="w-3 h-3" /> Response Time</span>
+                  <span className="font-mono text-cyan-400 font-bold">
+                    {telemetry?.responseTimeMs ? `${(telemetry.responseTimeMs / 1000).toFixed(2)}s` : '—'}
+                  </span>
+                </div>
+              </div>
+            </motion.aside>
+          )}
+        </AnimatePresence>
 
       </div>
 

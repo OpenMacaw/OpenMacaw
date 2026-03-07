@@ -12,11 +12,17 @@ export default function Auth() {
   const [allowSignup, setAllowSignup] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
-  const { login } = useAuth();
+  const { login, token } = useAuth();
 
   const from = (location.state as any)?.from?.pathname || '/chat';
 
   useEffect(() => {
+    // If already logged in, redirect away from /auth
+    if (token) {
+      navigate(from, { replace: true });
+      return;
+    }
+
     // Check if we need initial setup (First User = Admin)
     apiFetch('/api/auth/status')
       .then(r => r.json())
@@ -50,7 +56,7 @@ export default function Auth() {
       });
       const data = await res.json();
       
-      console.log('[DEBUG] Auth Response Status:', res.status, 'Message:', data.message, 'Error:', data.error);
+      console.log(`[DEBUG] Auth Response Status: ${res.status}${data.message ? ` Message: ${data.message}` : ''}${data.error ? ` Error: ${data.error}` : ''}`);
 
       if (!res.ok) {
         if (res.status === 403 && data.message === 'Account Activation Pending') {

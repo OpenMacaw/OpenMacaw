@@ -59,8 +59,8 @@ createRoot(document.getElementById('root')!).render(
         <Routes>
           <Route path="/auth" element={<Auth />} />
           <Route path="/auth/pending" element={<Pending />} />
-          <Route path="/" element={<ProtectedRoute><App /></ProtectedRoute>}>
-            <Route index element={<Navigate to="/chat" replace />} />
+          <Route element={<ProtectedRoute><App /></ProtectedRoute>}>
+            <Route path="/" element={<Navigate to="/chat" replace />} />
             <Route path="chat" element={<Chat />}>
               <Route path=":id" element={<Chat />} />
             </Route>
@@ -72,6 +72,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="catalog" element={<Catalog />} />
             <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
           </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
