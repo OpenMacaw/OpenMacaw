@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
-import { Save, Loader2, Cpu, Monitor, ToggleLeft, ToggleRight, Smartphone, Download, CheckCircle2, Bell, BellOff, Key, User as UserIcon, Upload, Trash2, AlertTriangle, RefreshCcw, X } from 'lucide-react';
+import { Save, Loader2, Cpu, Monitor, ToggleLeft, ToggleRight, Smartphone, Download, CheckCircle2, Bell, BellOff, Key, User as UserIcon, Upload, Trash2, AlertTriangle, RefreshCcw, X, Info } from 'lucide-react';
 import { apiFetch } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -213,27 +213,10 @@ export default function Settings() {
   return (
     <div className="p-6 max-w-4xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-10">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Account Settings</h1>
-          <p className="text-sm text-gray-500 font-mono mt-1">Your personal API keys and preferences.</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="h-4 flex items-center justify-end">
-            {saveStatus === 'saved' && <span className="text-green-500 text-xs font-mono animate-pulse">Saved!</span>}
-          </div>
-          <button
-            onClick={handleSave}
-            disabled={saveStatus === 'saving'}
-            className="flex items-center gap-2 px-5 py-2.5 bg-cyan-600 text-white rounded-lg hover:bg-cyan-500 disabled:opacity-50 transition-colors shadow-[0_0_15px_rgba(6,182,212,0.15)] min-w-[120px] justify-center"
-          >
-            {saveStatus === 'saving' ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4" />
-            )}
-            Save All
-          </button>
+          <h1 className="text-3xl font-bold text-white tracking-tight">Account Settings</h1>
+          <p className="text-sm text-gray-500 font-mono mt-1.5 opacity-80">Configure your personal preferences and secure access tokens.</p>
         </div>
       </div>
 
@@ -242,9 +225,11 @@ export default function Settings() {
 
         {/* ── Profile ─────────────────────────────── */}
         <div className={cardClass}>
-          <div className="flex items-center gap-2 mb-5">
-            <UserIcon className="w-4 h-4 text-cyan-500" />
-            <h2 className="text-sm font-bold text-white uppercase tracking-wider">Profile Picture</h2>
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <UserIcon className="w-4 h-4 text-cyan-500" />
+              <h2 className="text-sm font-bold text-white uppercase tracking-widest">Profile</h2>
+            </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded border border-white/10 bg-zinc-950 flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
@@ -278,19 +263,42 @@ export default function Settings() {
 
         {/* ── Personal API Keys ─────────────────────────────── */}
         <div className={cardClass}>
-          <div className="flex items-center gap-2 mb-5">
-            <Key className="w-4 h-4 text-cyan-500" />
-            <h2 className="text-sm font-bold text-white uppercase tracking-wider">Personal API Keys</h2>
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <Key className="w-4 h-4 text-cyan-500" />
+              <h2 className="text-sm font-bold text-white uppercase tracking-widest">API Tokens</h2>
+            </div>
+            <button
+              onClick={() => {
+                setSaveStatus('saving');
+                saveMutation.mutate({
+                  ANTHROPIC_API_KEY: formData.ANTHROPIC_API_KEY,
+                  OPENAI_API_KEY: formData.OPENAI_API_KEY
+                });
+              }}
+              disabled={saveStatus === 'saving'}
+              className="px-3 py-1.5 bg-cyan-600/10 hover:bg-cyan-600 text-cyan-500 hover:text-white border border-cyan-500/20 rounded-lg text-[10px] font-bold uppercase transition-all"
+            >
+              {saveStatus === 'saving' ? <Loader2 className="w-3" /> : 'Save Keys'}
+            </button>
           </div>
-          <p className="text-[10px] text-gray-600 font-mono mb-4 leading-relaxed">
-            Your keys override the server defaults. Leave blank to use the workspace key set by the admin.
+          <p className="text-[10px] text-gray-500 font-mono mb-6 leading-relaxed bg-black/20 p-2 rounded-lg border border-white/5">
+            Personal keys override workspace defaults. Leave blank to inherit system-wide configuration.
           </p>
           <div className="space-y-4">
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-medium text-gray-400">Anthropic API Key</label>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <label className="block text-xs font-bold text-gray-300">Anthropic Key</label>
+                  <div className="group relative">
+                    <Info className="w-3 h-3 text-gray-600 cursor-help" />
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-zinc-800 border border-white/10 rounded-lg text-[10px] text-gray-300 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                      Used for Claude models. Get yours at console.anthropic.com
+                    </div>
+                  </div>
+                </div>
                 {!formData.ANTHROPIC_API_KEY && hasServerKey('ANTHROPIC_API_KEY') && (
-                  <span className="text-[9px] font-mono text-emerald-500 bg-emerald-950/30 px-1.5 py-0.5 rounded border border-emerald-500/20">Using Server Default</span>
+                  <span className="text-[8px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/10">Inheriting System Default</span>
                 )}
               </div>
               <input
@@ -302,10 +310,18 @@ export default function Settings() {
               />
             </div>
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-medium text-gray-400">OpenAI API Key</label>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <label className="block text-xs font-bold text-gray-300">OpenAI Key</label>
+                  <div className="group relative">
+                    <Info className="w-3 h-3 text-gray-600 cursor-help" />
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-zinc-800 border border-white/10 rounded-lg text-[10px] text-gray-300 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                      Used for GPT models. Get yours at platform.openai.com
+                    </div>
+                  </div>
+                </div>
                 {!formData.OPENAI_API_KEY && hasServerKey('OPENAI_API_KEY') && (
-                  <span className="text-[9px] font-mono text-emerald-500 bg-emerald-950/30 px-1.5 py-0.5 rounded border border-emerald-500/20">Using Server Default</span>
+                  <span className="text-[8px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/10">Inheriting System Default</span>
                 )}
               </div>
               <input
@@ -321,9 +337,24 @@ export default function Settings() {
 
         {/* ── UI Preferences ─────────────────────────────── */}
         <div className={cardClass}>
-          <div className="flex items-center gap-2 mb-5">
-            <Monitor className="w-4 h-4 text-cyan-500" />
-            <h2 className="text-sm font-bold text-white uppercase tracking-wider">UI Preferences</h2>
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <Monitor className="w-4 h-4 text-cyan-500" />
+              <h2 className="text-sm font-bold text-white uppercase tracking-widest">Interface</h2>
+            </div>
+            <button
+              onClick={() => {
+                setSaveStatus('saving');
+                saveMutation.mutate({
+                  AUTO_SCROLL_CHAT: formData.AUTO_SCROLL_CHAT,
+                  SHOW_RAW_JSON_LOGS: formData.SHOW_RAW_JSON_LOGS
+                });
+              }}
+              disabled={saveStatus === 'saving'}
+              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-gray-400 hover:text-white border border-white/5 rounded-lg text-[10px] font-bold uppercase transition-all"
+            >
+              {saveStatus === 'saving' ? <Loader2 className="w-3" /> : 'Save UI'}
+            </button>
           </div>
           <div className="space-y-1 divide-y divide-white/5">
             <Toggle

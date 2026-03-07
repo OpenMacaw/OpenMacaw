@@ -18,6 +18,7 @@ interface CatalogEntry {
     envKeys?: string[];           // required env var keys to highlight
     homepage?: string;
     tags: string[];
+    toolPreview?: string[];       // static preview of tools for better UX
 }
 
 const CATALOG: CatalogEntry[] = [
@@ -33,6 +34,7 @@ const CATALOG: CatalogEntry[] = [
         args: JSON.stringify(['-y', '@modelcontextprotocol/server-filesystem', '/']),
         tags: ['files', 'read', 'write', 'official'],
         homepage: 'https://github.com/modelcontextprotocol/servers',
+        toolPreview: ['read_file', 'write_file', 'list_directory', 'move_file', 'search_files'],
     },
     {
         id: 'github',
@@ -47,6 +49,7 @@ const CATALOG: CatalogEntry[] = [
         envVars: '{\n  "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."\n}',
         tags: ['git', 'repos', 'issues', 'official'],
         homepage: 'https://github.com/modelcontextprotocol/servers',
+        toolPreview: ['create_issue', 'get_repository', 'search_code', 'list_pull_requests'],
     },
     {
         id: 'gitlab',
@@ -311,7 +314,7 @@ function CatalogCard({
     isAdding: boolean;
 }) {
     return (
-        <div className={`relative flex flex-col bg-zinc-900 border rounded-xl p-5 transition-all duration-200 hover:border-white/20 hover:shadow-lg hover:shadow-black/40 group ${isAdded ? 'border-cyan-500/40 bg-cyan-950/10' : 'border-white/5'
+        <div className={`relative flex flex-col bg-zinc-900 border rounded-2xl p-6 transition-all duration-300 hover:border-white/20 hover:shadow-2xl hover:shadow-cyan-500/5 group ${isAdded ? 'border-cyan-500/40 bg-cyan-950/10' : 'border-white/5'
             }`}>
             {/* Header */}
             <div className="flex items-start justify-between mb-3">
@@ -358,23 +361,36 @@ function CatalogCard({
                 ))}
             </div>
 
-            {/* Add button */}
-            <button
-                onClick={() => onAdd(entry)}
-                disabled={isAdded || isAdding}
-                className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all duration-200 ${isAdded
-                        ? 'bg-cyan-950/40 text-cyan-400 border border-cyan-500/30 cursor-default'
-                        : 'bg-white/5 text-gray-300 border border-white/10 hover:bg-cyan-600 hover:text-white hover:border-cyan-500 hover:shadow-[0_0_20px_rgba(6,182,212,0.2)]'
-                    }`}
-            >
-                {isAdding ? (
-                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Adding…</>
-                ) : isAdded ? (
-                    <><CheckCircle2 className="w-3.5 h-3.5" /> Added</>
-                ) : (
-                    <><Plus className="w-3.5 h-3.5" /> Add &amp; Start</>
+            {/* Add button group */}
+            <div className="flex gap-2">
+                {entry.toolPreview && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            alert(`Tools in ${entry.name}:\n\n• ${entry.toolPreview?.join('\n• ')}`);
+                        }}
+                        className="px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all"
+                    >
+                        Tools
+                    </button>
                 )}
-            </button>
+                <button
+                    onClick={() => onAdd(entry)}
+                    disabled={isAdded || isAdding}
+                    className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all duration-200 ${isAdded
+                            ? 'bg-cyan-950/40 text-cyan-400 border border-cyan-500/30 cursor-default'
+                            : 'bg-white/5 text-gray-300 border border-white/10 hover:bg-cyan-600 hover:text-white hover:border-cyan-500 hover:shadow-[0_0_20px_rgba(6,182,212,0.2)]'
+                        }`}
+                >
+                    {isAdding ? (
+                        <><Loader2 className="w-3 h-3 animate-spin" /> Installing…</>
+                    ) : isAdded ? (
+                        <><CheckCircle2 className="w-3 h-3" /> Installed</>
+                    ) : (
+                        <><Plus className="w-3 h-3" /> Install &amp; Connect</>
+                    )}
+                </button>
+            </div>
         </div>
     );
 }
@@ -470,8 +486,8 @@ export default function Catalog() {
             <div className="px-6 pt-6 pb-4 border-b border-white/5 shrink-0">
                 <div className="flex items-center justify-between mb-4">
                     <div>
-                        <h1 className="text-2xl font-bold text-white tracking-tight">MCP Catalog</h1>
-                        <p className="text-sm text-gray-500 mt-0.5">Browse and install MCP servers with one click.</p>
+                        <h1 className="text-3xl font-bold text-white tracking-tight">MCP Universe</h1>
+                        <p className="text-sm text-gray-500 mt-1 font-mono opacity-80">Discover and orbit specialized Model Context Protocol servers.</p>
                     </div>
                     <a
                         href="https://mcp.so"

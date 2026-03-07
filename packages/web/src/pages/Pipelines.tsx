@@ -33,24 +33,27 @@ interface Session {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const TYPE_META: Record<PipelineType, { label: string; color: string; icon: string; description: string }> = {
+const TYPE_META: Record<PipelineType, { label: string; color: string; icon: string; description: string; portalUrl: string }> = {
   discord: {
     label: 'Discord',
     color: 'text-indigo-400 bg-indigo-950/40 border-indigo-500/30',
     icon: '🎮',
     description: 'Discord bot that responds in channels or DMs',
+    portalUrl: 'https://discord.com/developers/applications',
   },
   telegram: {
     label: 'Telegram',
     color: 'text-sky-400 bg-sky-950/40 border-sky-500/30',
     icon: '✈️',
-    description: 'Telegram bot via long-polling',
+    description: 'Telegram bot via long-polling or webhooks',
+    portalUrl: 'https://t.me/botfather',
   },
   line: {
     label: 'LINE',
     color: 'text-green-400 bg-green-950/40 border-green-500/30',
     icon: '💬',
     description: 'LINE Messaging API via inbound webhook',
+    portalUrl: 'https://developers.line.biz/console/',
   },
 };
 
@@ -207,24 +210,36 @@ function AddPipelineModal({
 
           {/* Type selector */}
           <div>
-            <label className="block text-xs font-mono text-gray-400 mb-2">Connector Type</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-mono text-gray-400 uppercase tracking-wider">Connector Type</label>
+              <a
+                href={TYPE_META[type].portalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] text-cyan-500 hover:text-cyan-400 border-b border-cyan-500/20 hover:border-cyan-400 transition-all font-mono"
+              >
+                Open Dev Portal &rarr;
+              </a>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
               {(Object.keys(TYPE_META) as PipelineType[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => handleTypeChange(t)}
-                  className={`flex flex-col items-center gap-1 px-3 py-3 rounded-lg border text-xs font-mono transition-all ${
+                  className={`flex flex-col items-center gap-2 px-3 py-4 rounded-xl border text-xs font-mono transition-all duration-200 ${
                     type === t
-                      ? 'bg-cyan-950/40 border-cyan-500/50 text-cyan-300'
-                      : 'bg-black border-white/10 text-gray-400 hover:border-white/20 hover:text-gray-300'
+                      ? 'bg-cyan-950/20 border-cyan-500 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.1)]'
+                      : 'bg-black border-white/5 text-gray-500 hover:border-white/20 hover:text-gray-300'
                   }`}
                 >
-                  <span className="text-xl">{TYPE_META[t].icon}</span>
-                  <span>{TYPE_META[t].label}</span>
+                  <span className={`text-2xl transition-transform duration-200 ${type === t ? 'scale-110' : 'opacity-50 grayscale'}`}>
+                    {TYPE_META[t].icon}
+                  </span>
+                  <span className="font-bold tracking-tight">{TYPE_META[t].label}</span>
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-gray-500 mt-1.5">{TYPE_META[type].description}</p>
+            <p className="text-[10px] text-gray-500 mt-2 italic leading-relaxed">{TYPE_META[type].description}</p>
           </div>
 
           {/* Session */}

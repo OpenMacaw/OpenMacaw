@@ -575,8 +575,8 @@ export default function Admin() {
           <ShieldAlert className="w-5 h-5 text-amber-400" />
         </div>
         <div>
-          <h1 className="text-lg font-bold text-white font-mono tracking-wide">Admin Panel</h1>
-          <p className="text-xs text-gray-500 font-mono">System overview, user governance & workspace settings</p>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Admin Control Center</h1>
+          <p className="text-sm text-gray-500 font-mono mt-1 opacity-80">System-wide governance, user management & security protocols.</p>
         </div>
       </div>
 
@@ -601,8 +601,8 @@ export default function Admin() {
       {/* User Management Table */}
       <div className="border border-white/10 rounded-lg overflow-hidden bg-zinc-950/50 mb-8">
         <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
-          <span className="text-xs font-mono uppercase tracking-wider text-gray-500 flex items-center gap-2">
-            <Users className="w-3.5 h-3.5 text-cyan-500" />
+          <span className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
+            <Users className="w-4 h-4 text-cyan-500" />
             User Management
           </span>
           <div className="flex items-center gap-3">

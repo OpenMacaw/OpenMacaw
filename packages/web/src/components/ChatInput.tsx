@@ -382,13 +382,13 @@ export function ChatInput({
           id="agentic-mode-btn"
           onClick={() => setAgenticOpen(v => !v)}
           disabled={!sessionId || isStreaming}
-          title="Run agent autonomously"
+          title={agenticOpen ? "Close Agentic Planning" : "Run Agent Autonomously (⚡)"}
           className={`p-2.5 rounded-md border transition-all self-end disabled:opacity-30 disabled:cursor-not-allowed ${agenticOpen
-              ? 'bg-violet-600 border-violet-500 text-white shadow-[0_0_12px_rgba(139,92,246,0.5)]'
-              : 'bg-zinc-950 border-white/10 text-violet-400 hover:bg-violet-950/30 hover:border-violet-500/30'
+              ? 'bg-violet-600 border-violet-500 text-white shadow-[0_0_15px_rgba(139,92,246,0.6)] animate-pulse'
+              : 'bg-zinc-950 border-white/10 text-violet-400 hover:bg-violet-950/30 hover:border-violet-500/30 hover:shadow-[0_0_10px_rgba(139,92,246,0.3)]'
             }`}
         >
-          <Zap className="w-4 h-4" />
+          <Zap className="w-4 h-4 shadow-sm" />
         </button>
 
         <div className="flex-1 relative">
@@ -437,13 +437,23 @@ export function ChatInput({
       </div>
 
       {/* ── Hotkey Hint ───────────────────────────────────────────────────── */}
-      <div className="mt-1.5 flex items-center gap-3 max-w-4xl mx-auto px-1">
-        <span className="text-[9px] font-mono text-gray-600">
-          <kbd className="px-1 py-0.5 bg-white/5 rounded text-[8px]">⌘K</kbd> focus ·{' '}
-          <kbd className="px-1 py-0.5 bg-white/5 rounded text-[8px]">↑</kbd> recall ·{' '}
-          <kbd className="px-1 py-0.5 bg-white/5 rounded text-[8px]">/</kbd> commands ·{' '}
-          <kbd className="px-1 py-0.5 bg-white/5 rounded text-[8px]">⚡</kbd> agentic
-        </span>
+      <div className="mt-2 flex items-center gap-4 max-w-4xl mx-auto px-1 opacity-40 hover:opacity-100 transition-opacity duration-300">
+        <div className="flex items-center gap-1.5 grayscale hover:grayscale-0 transition-all">
+          <kbd className="px-1.5 py-0.5 bg-zinc-800 border border-white/10 rounded text-[9px] text-gray-400 font-sans shadow-sm">⌘K</kbd>
+          <span className="text-[9px] font-mono text-gray-500">focus</span>
+        </div>
+        <div className="flex items-center gap-1.5 grayscale hover:grayscale-0 transition-all">
+          <kbd className="px-1.5 py-0.5 bg-zinc-800 border border-white/10 rounded text-[9px] text-gray-400 font-sans shadow-sm">↑</kbd>
+          <span className="text-[9px] font-mono text-gray-500">recall</span>
+        </div>
+        <div className="flex items-center gap-1.5 grayscale hover:grayscale-0 transition-all">
+          <kbd className="px-1.5 py-0.5 bg-zinc-800 border border-white/10 rounded text-[9px] text-gray-400 font-sans shadow-sm">/</kbd>
+          <span className="text-[9px] font-mono text-gray-500">commands</span>
+        </div>
+        <div className="flex items-center gap-1.5 grayscale hover:grayscale-0 transition-all">
+          <kbd className="px-1.5 py-0.5 bg-zinc-800 border border-white/10 rounded text-[9px] text-gray-400 font-sans shadow-sm">Enter</kbd>
+          <span className="text-[9px] font-mono text-gray-500">send</span>
+        </div>
       </div>
     </div>
   );

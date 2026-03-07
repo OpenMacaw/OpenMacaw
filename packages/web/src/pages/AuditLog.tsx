@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Search, ChevronRight, ChevronDown, Clock, SearchX } from 'lucide-react';
+import { Loader2, Search, ChevronRight, ChevronDown, Clock, SearchX, Download, Calendar, Filter } from 'lucide-react';
 import React, { useState, useMemo, useEffect } from 'react';
 import { apiFetch } from '../api';
 
@@ -18,6 +18,8 @@ export default function AuditLog() {
   const [filter, setFilter] = useState<{ serverId?: string; outcome?: string; search?: string }>({});
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showRawJson, setShowRawJson] = useState(false);
+  const [limit, setLimit] = useState(50);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Read preference from localStorage (set by Settings page)
   useEffect(() => {
@@ -41,7 +43,7 @@ export default function AuditLog() {
       if (filter.serverId) params.set('serverId', filter.serverId);
       if (filter.outcome) params.set('type', filter.outcome);
       if (filter.search) params.set('search', filter.search);
-      params.set('limit', '100');
+      params.set('limit', limit.toString());
       
       const res = await apiFetch(`/api/activity?${params}`);
       return res.json();
@@ -97,6 +99,23 @@ export default function AuditLog() {
             <option value="auto_approved">⚡ AUTO</option>
             <option value="denied">DENIED</option>
           </select>
+          <button
+            onClick={async () => {
+              if (!activities) return;
+              setIsExporting(true);
+              const blob = new Blob([JSON.stringify(activities, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `audit-log-${new Date().toISOString().split('T')[0]}.json`;
+              a.click();
+              setIsExporting(false);
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-mono bg-zinc-900 border border-white/10 rounded hover:bg-zinc-800 text-gray-400 hover:text-white transition-all uppercase tracking-tight"
+          >
+            <Download className="w-3 h-3" />
+            {isExporting ? '...' : 'Export'}
+          </button>
         </div>
       </div>
 
@@ -205,6 +224,18 @@ export default function AuditLog() {
               )}
             </tbody>
           </table>
+        )}
+
+        {/* Load More Footer */}
+        {activities && activities.length >= limit && (
+          <div className="p-6 flex justify-center border-t border-white/5 bg-black/50 backdrop-blur-sm sticky bottom-0">
+            <button
+              onClick={() => setLimit(prev => prev + 50)}
+              className="px-8 py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl text-[10px] font-bold font-mono text-gray-400 hover:text-white transition-all uppercase tracking-widest shadow-xl"
+            >
+              Load Older Records
+            </button>
+          </div>
         )}
       </div>
     </div>

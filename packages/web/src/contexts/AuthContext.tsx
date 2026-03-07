@@ -109,7 +109,7 @@ export function AdminRoute({ children }: { children: ReactNode }) {
   }
 
   if (user?.role !== 'admin') {
-    return <Navigate to="/chat" replace />;
+    return <Navigate to="/forbidden" replace />;
   }
 
   return <>{children}</>;

@@ -507,6 +507,7 @@ function App() {
     { path: '/catalog', label: 'Catalog', icon: BookMarked },
     { path: '/activity', label: 'Audit Log', icon: Activity },
     { path: '/pipelines', label: 'Pipelines', icon: Workflow },
+    ...(user?.role === 'admin' ? [{ path: '/admin', label: 'Admin', icon: Settings2 }] : []),
   ];
 
   const handleNewChat = () => {

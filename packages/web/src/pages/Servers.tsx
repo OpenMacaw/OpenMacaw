@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Plus, Play, Square, Trash2, Shield, Loader2, AlertCircle, ChevronDown, Wand2, Edit2, X } from 'lucide-react';
+import { Plus, Play, Square, Trash2, Shield, Loader2, AlertCircle, ChevronDown, Wand2, Edit2, X, Info } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { apiFetch } from '../api';
 
 interface Server {
@@ -70,10 +71,10 @@ export default function Servers() {
   const [formData, setFormData] = useState<FormData>(EMPTY_FORM);
   const [editingServerId, setEditingServerId] = useState<string | null>(null);
   const [envVarsError, setEnvVarsError] = useState<string | null>(null);
+  const [argsError, setArgsError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [startingId, setStartingId] = useState<string | null>(null);
-  const formRef = useRef<HTMLDivElement>(null);
 
   const isEditMode = editingServerId !== null;
 
@@ -171,9 +172,8 @@ export default function Servers() {
       envVars: prettyEnv(server.envVars),
     });
     setEnvVarsError(null);
+    setArgsError(null);
     setShowForm(true);
-    // Scroll form into view
-    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   };
 
   const validateEnvVars = (raw: string): boolean => {
@@ -192,9 +192,30 @@ export default function Servers() {
     }
   };
 
+  const validateArgs = (raw: string): boolean => {
+    if (!raw.trim()) { setArgsError(null); return true; }
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        setArgsError('Must be a JSON array, e.g. ["--arg1", "val1"]');
+        return false;
+      }
+      setArgsError(null);
+      return true;
+    } catch {
+      setArgsError('Invalid JSON array — ensure it starts with [ and ends with ].');
+      return false;
+    }
+  };
+
   const handleEnvVarsChange = (val: string) => {
     setFormData(f => ({ ...f, envVars: val }));
     validateEnvVars(val);
+  };
+
+  const handleArgsChange = (val: string) => {
+    setFormData(f => ({ ...f, args: val }));
+    validateArgs(val);
   };
 
   const formatEnvVars = () => {
@@ -210,7 +231,11 @@ export default function Servers() {
   const loadPreset = (presetId: string) => {
     if (!presetId) return;
     const preset = PRESETS.find(p => p.id === presetId);
-    if (preset) { setFormData({ ...preset.data }); setEnvVarsError(null); }
+    if (preset) { 
+      setFormData({ ...preset.data }); 
+      setEnvVarsError(null);
+      setArgsError(null);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -258,158 +283,168 @@ export default function Servers() {
         </div>
       )}
 
-      {showForm && (
-        <div
-          ref={formRef}
-          className={`mb-6 p-5 rounded-xl shadow-sm transition-colors ${
-            isEditMode
-              ? 'bg-cyan-950/30 border border-cyan-500/40'   // ── Cyan border in edit mode
-              : 'bg-zinc-900/60 border border-white/10'
-          }`}
-        >
-          {/* ── Edit mode banner ──────────────────────────────────────────── */}
-          {isEditMode && (
-            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-cyan-500/20">
-              <Edit2 className="w-4 h-4 text-cyan-400" />
-              <span className="text-sm font-semibold text-cyan-300">Editing: {formData.name}</span>
-              <button
-                type="button"
-                onClick={resetForm}
-                className="ml-auto flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors"
-              >
-                <X className="w-3 h-3" />Cancel Edit
-              </button>
-            </div>
-          )}
-
-          {!isEditMode && (
-            <h2 className="text-base font-semibold text-white mb-4">Add MCP Server</h2>
-          )}
-
-          {/* ── Load Template (only in Create mode) ──────────────────────── */}
-          {!isEditMode && (
-            <div className="mb-5 pb-5 border-b border-white/5">
-              <label className="block text-xs font-medium text-gray-400 mb-1.5 uppercase tracking-wider">Load Template</label>
-              <div className="relative">
-                <select
-                  defaultValue=""
-                  onChange={(e) => loadPreset(e.target.value)}
-                  className="w-full appearance-none px-3 py-2.5 bg-zinc-800 border border-white/10 text-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-cyan-500 pr-9 text-sm"
-                >
-                  <option value="" disabled>— choose a preset to pre-fill the form —</option>
-                  {PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-                </select>
-                <ChevronDown className="w-4 h-4 text-gray-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1">Name</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData(f => ({ ...f, name: e.target.value }))}
-                  className="w-full px-3 py-2 bg-zinc-900 border border-white/10 text-white placeholder-zinc-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500 text-sm"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1">Transport</label>
-                <select
-                  value={formData.transport}
-                  onChange={(e) => setFormData(f => ({ ...f, transport: e.target.value }))}
-                  className="w-full px-3 py-2 bg-zinc-900 border border-white/10 text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-cyan-500 text-sm"
-                >
-                  <option value="stdio">Stdio</option>
-                  <option value="http">HTTP/SSE</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1">Command</label>
-                <input
-                  type="text"
-                  value={formData.command}
-                  onChange={(e) => setFormData(f => ({ ...f, command: e.target.value }))}
-                  placeholder="npx"
-                  className="w-full px-3 py-2 bg-zinc-900 border border-white/10 text-white placeholder-zinc-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-cyan-500 font-mono text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1">
-                  Arguments <span className="text-gray-600 font-normal">(JSON array)</span>
-                </label>
-                <input
-                  type="text"
-                  value={formData.args}
-                  onChange={(e) => setFormData(f => ({ ...f, args: e.target.value }))}
-                  placeholder='["-y", "some-mcp-server"]'
-                  className="w-full px-3 py-2 bg-zinc-900 border border-white/10 text-white placeholder-zinc-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-cyan-500 font-mono text-sm"
-                />
-                <p className="mt-1 text-[11px] text-gray-600">
-                  Find more at{' '}
-                  <a href="https://mcp.so" target="_blank" rel="noopener noreferrer" className="text-cyan-600 hover:text-cyan-400 transition-colors">mcp.so</a>
-                </p>
-              </div>
-            </div>
-
-            {/* ── Env Vars ─────────────────────────────────────────────────── */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-sm font-medium text-gray-400">
-                  Environment Variables <span className="text-gray-600 font-normal">(JSON object)</span>
-                </label>
+      <AnimatePresence>
+        {showForm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={resetForm}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-2xl bg-zinc-950 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-10"
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-zinc-900/50">
+                <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                  {isEditMode ? <Edit2 className="w-5 h-5 text-cyan-500" /> : <Plus className="w-5 h-5 text-cyan-500" />}
+                  {isEditMode ? 'Edit MCP Server' : 'Add MCP Server'}
+                </h2>
                 <button
-                  type="button"
-                  onClick={formatEnvVars}
-                  disabled={!formData.envVars.trim()}
-                  className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono text-gray-400 border border-white/10 rounded hover:bg-white/5 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  title="Pretty-print JSON"
+                  onClick={resetForm}
+                  className="p-1 hover:bg-white/5 rounded-md text-gray-500 hover:text-gray-300 transition-colors"
                 >
-                  <Wand2 className="w-3 h-3" />Format JSON
+                  <X className="w-5 h-5" />
                 </button>
               </div>
-              <textarea
-                value={formData.envVars}
-                onChange={(e) => handleEnvVarsChange(e.target.value)}
-                placeholder={'{\n  "MY_API_KEY": "sk-..."\n}'}
-                rows={4}
-                className={`w-full px-3 py-2 bg-zinc-900 border rounded-lg focus:outline-none focus:ring-1 focus:ring-cyan-500 font-mono text-sm text-white placeholder-zinc-600 resize-y leading-relaxed ${
-                  envVarsError ? 'border-red-500/50' : 'border-white/10 focus:border-cyan-500'
-                }`}
-              />
-              {envVarsError && (
-                <p className="mt-1 text-[11px] text-red-400 font-mono flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3 shrink-0" />{envVarsError}
-                </p>
-              )}
-            </div>
 
-            <div className="flex gap-2 pt-1">
-              <button
-                type="submit"
-                disabled={isSaving || !!envVarsError}
-                className="px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 text-sm font-medium"
-              >
-                {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-                {isEditMode ? 'Save Changes' : 'Add Server'}
-              </button>
-              <button
-                type="button"
-                onClick={resetForm}
-                className="px-4 py-2 border border-white/10 text-gray-400 rounded-lg hover:bg-white/5 hover:text-white transition-colors text-sm"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+              <div className="p-6 max-h-[80vh] overflow-y-auto">
+                {/* ── Load Template (only in Create mode) ──────────────────────── */}
+                {!isEditMode && (
+                  <div className="mb-6 pb-6 border-b border-white/5">
+                    <label className="block text-[11px] font-mono text-gray-500 mb-2 uppercase tracking-widest">Load Template</label>
+                    <div className="relative">
+                      <select
+                        defaultValue=""
+                        onChange={(e) => loadPreset(e.target.value)}
+                        className="w-full appearance-none px-4 py-3 bg-black border border-white/10 text-gray-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-cyan-500 pr-10 text-sm transition-all"
+                      >
+                        <option value="" disabled>— choose a preset to pre-fill —</option>
+                        {PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      </select>
+                      <ChevronDown className="w-4 h-4 text-gray-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  <div className="grid grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-xs font-mono text-gray-500 mb-1.5 uppercase tracking-wider">Name</label>
+                      <input
+                        type="text"
+                        value={formData.name}
+                        onChange={(e) => setFormData(f => ({ ...f, name: e.target.value }))}
+                        className="w-full px-4 py-2.5 bg-black border border-white/10 text-white placeholder-zinc-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500 text-sm transition-all"
+                        placeholder="My Server"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-mono text-gray-500 mb-1.5 uppercase tracking-wider">Transport</label>
+                      <select
+                        value={formData.transport}
+                        onChange={(e) => setFormData(f => ({ ...f, transport: e.target.value }))}
+                        className="w-full px-4 py-2.5 bg-black border border-white/10 text-white rounded-xl focus:outline-none focus:ring-1 focus:ring-cyan-500 text-sm transition-all"
+                      >
+                        <option value="stdio">Stdio (Local Process)</option>
+                        <option value="http">HTTP/SSE (Remote)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-xs font-mono text-gray-500 mb-1.5 uppercase tracking-wider">Runtime / Command</label>
+                      <input
+                        type="text"
+                        value={formData.command}
+                        onChange={(e) => setFormData(f => ({ ...f, command: e.target.value }))}
+                        placeholder="e.g. npx, node, python"
+                        className="w-full px-4 py-2.5 bg-black border border-white/10 text-white placeholder-zinc-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-cyan-500 font-mono text-sm transition-all"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-mono text-gray-500 uppercase tracking-wider">
+                          Arguments
+                        </label>
+                        {argsError && <span className="text-[10px] text-red-500 animate-pulse font-mono flex items-center gap-1"><AlertCircle size={10} /> invalid array</span>}
+                      </div>
+                      <input
+                        type="text"
+                        value={formData.args}
+                        onChange={(e) => handleArgsChange(e.target.value)}
+                        placeholder='["-y", "package"]'
+                        className={`w-full px-4 py-2.5 bg-black border rounded-xl focus:outline-none focus:ring-1 focus:ring-cyan-500 font-mono text-sm text-white placeholder-zinc-700 transition-all ${argsError ? 'border-red-500/50' : 'border-white/10'}`}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs font-mono text-gray-500 uppercase tracking-wider">
+                        Environment Variables
+                      </label>
+                      <button
+                        type="button"
+                        onClick={formatEnvVars}
+                        disabled={!formData.envVars.trim()}
+                        className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-mono text-gray-400 border border-white/10 rounded-lg hover:bg-white/5 hover:text-cyan-400 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                      >
+                        <Wand2 className="w-3.5 h-3.5" />Format JSON
+                      </button>
+                    </div>
+                    <textarea
+                      value={formData.envVars}
+                      onChange={(e) => handleEnvVarsChange(e.target.value)}
+                      placeholder={'{\n  "API_KEY": "sk-..."\n}'}
+                      rows={5}
+                      className={`w-full px-4 py-3 bg-black border rounded-xl focus:outline-none focus:ring-1 focus:ring-cyan-500 font-mono text-sm text-white placeholder-zinc-700 resize-none leading-relaxed transition-all ${
+                        envVarsError ? 'border-red-500/50' : 'border-white/10'
+                      }`}
+                    />
+                    {envVarsError && (
+                      <p className="mt-2 text-[11px] text-red-400 font-mono flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />{envVarsError}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="submit"
+                      disabled={isSaving || !!envVarsError || !!argsError}
+                      className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-cyan-600 text-white rounded-xl hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all text-sm font-bold shadow-lg shadow-cyan-900/20"
+                    >
+                      {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {isEditMode ? 'Update Configuration' : 'Connect & Start Server'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetForm}
+                      className="px-6 py-3 bg-zinc-900 border border-white/10 text-gray-400 rounded-xl hover:bg-white/5 hover:text-white transition-all text-sm font-medium"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              <div className="px-6 py-4 bg-zinc-900/30 border-t border-white/5 flex items-center gap-2">
+                <Info className="w-3.5 h-3.5 text-gray-500" />
+                <p className="text-[10px] text-gray-500 leading-tight">
+                  Configuration changes require a server restart to take effect. Environment variables should follow standard JSON object format.
+                </p>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {isLoading ? (
         <div className="flex items-center justify-center py-12">

@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Eye, EyeOff } from 'lucide-react';
 import { apiFetch } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Auth() {
   const [mode, setMode] = useState<'loading' | 'login' | 'signup'>('loading');
-  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [allowSignup, setAllowSignup] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
@@ -43,16 +44,26 @@ export default function Auth() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setLoading(true);
+    if (mode === 'signup' && form.password !== form.confirmPassword) {
+      setError('Passwords do not match');
+      setLoading(false);
+      return;
+    }
 
     try {
       const endpoint = mode === 'signup' ? '/api/auth/register' : '/api/auth/login';
       const cacheBustedEndpoint = `${endpoint}?t=${Date.now()}`;
       
+      const payload = { 
+        name: form.name, 
+        email: form.email, 
+        password: form.password 
+      };
+
       const res = await apiFetch(cacheBustedEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       
@@ -94,8 +105,14 @@ export default function Auth() {
   }
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-black/50 border border-white/10 rounded-2xl p-8 relative overflow-hidden">
+    <div className="min-h-screen bg-black flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Decorative Background */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-[25%] -left-[10%] w-[700px] h-[700px] bg-cyan-500/10 rounded-full blur-[120px]" />
+        <div className="absolute -bottom-[25%] -right-[10%] w-[600px] h-[600px] bg-purple-500/10 rounded-full blur-[120px]" />
+      </div>
+
+      <div className="w-full max-w-sm bg-zinc-950/50 backdrop-blur-xl border border-white/10 rounded-2xl p-8 relative z-10 shadow-2xl">
         
         <div className="flex flex-col items-center mb-8">
           <div className="text-4xl mb-4">🦜</div>
@@ -136,17 +153,40 @@ export default function Auth() {
             />
           </div>
 
-          <div>
+          <div className="relative">
             <label className="block text-sm text-gray-300 mb-1.5">Password</label>
-            <input 
-              type="password" 
-              value={form.password}
-              onChange={e => setForm({...form, password: e.target.value})}
-              required
-              className="w-full bg-black border border-white/10 rounded-full px-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30 transition-all font-sans"
-              placeholder="••••••••"
-            />
+            <div className="relative">
+              <input 
+                type={showPassword ? "text" : "password"} 
+                value={form.password}
+                onChange={e => setForm({...form, password: e.target.value})}
+                required
+                className="w-full bg-black border border-white/10 rounded-full px-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30 transition-all font-sans pr-10"
+                placeholder="••••••••"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
+
+          {mode === 'signup' && (
+            <div>
+              <label className="block text-sm text-gray-300 mb-1.5">Confirm Password</label>
+              <input 
+                type={showPassword ? "text" : "password"} 
+                value={form.confirmPassword}
+                onChange={e => setForm({...form, confirmPassword: e.target.value})}
+                required={mode === 'signup'}
+                className="w-full bg-black border border-white/10 rounded-full px-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30 transition-all font-sans"
+                placeholder="••••••••"
+              />
+            </div>
+          )}
 
           {error && (
             <div className="bg-red-950/30 border border-red-500/20 rounded-lg p-3 text-sm text-red-400 text-center">

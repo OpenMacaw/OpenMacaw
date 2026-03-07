@@ -13,33 +13,49 @@ function CodeBlock({ children, className, ...props }: any) {
   const [copied, setCopied] = useState(false);
   const codeRef = useRef<HTMLElement>(null);
 
-  const handleCopy = () => {
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
     const text = codeRef.current?.textContent || '';
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Only add the button to actual code blocks (inside <pre>), not inline code
-  const isInline = !className && typeof children === 'string' && !children.includes('\n');
+  const isInline = !className && typeof children === 'string' && !children.trim().includes('\n');
   if (isInline) {
-    return <code className={className} {...props}>{children}</code>;
+    return <code className="bg-white/10 px-1.5 py-0.5 rounded text-cyan-300 font-mono text-xs" {...props}>{children}</code>;
   }
 
+  // Extract language from className (e.g., "language-javascript")
+  const lang = className?.replace('language-', '') || 'code';
+
   return (
-    <div className="relative group">
-      <button
-        onClick={handleCopy}
-        className="absolute top-2 right-2 p-1.5 bg-white/5 border border-white/10 rounded hover:bg-white/10 transition-all opacity-0 group-hover:opacity-100 z-10"
-        title="Copy code"
-      >
-        {copied ? (
-          <Check className="w-3 h-3 text-green-400" />
-        ) : (
-          <Copy className="w-3 h-3 text-gray-400" />
-        )}
-      </button>
-      <code ref={codeRef} className={className} {...props}>{children}</code>
+    <div className="relative group my-6 rounded-xl overflow-hidden border border-white/5 bg-zinc-950/50 shadow-2xl backdrop-blur-sm">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-white/5 border-b border-white/5">
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-cyan-500/50" />
+          <span className="text-[10px] font-mono text-gray-400 uppercase tracking-[0.2em] font-bold">{lang}</span>
+        </div>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 transition-all text-gray-400 hover:text-white group/btn"
+        >
+          {copied ? (
+            <>
+              <Check className="w-3 h-3 text-green-400" />
+              <span className="text-[10px] font-bold uppercase tracking-wider">Copied</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-3 h-3 group-hover/btn:scale-110 transition-transform" />
+              <span className="text-[10px] font-bold uppercase tracking-wider">Copy</span>
+            </>
+          )}
+        </button>
+      </div>
+      <div className="p-5 overflow-x-auto custom-scrollbar">
+        <code ref={codeRef} className={`${className} text-[13px] leading-relaxed font-mono selection:bg-cyan-500/30`} {...props}>{children}</code>
+      </div>
     </div>
   );
 }
@@ -1831,7 +1847,7 @@ export default function Chat() {
             <div className="flex items-center justify-center h-full">
               <Loader2 className="w-5 h-5 animate-spin text-gray-600" />
             </div>
-          ) : allMessages.length === 0 ? (
+          ) : displayMessages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-md space-y-6">
                 {/* Hero */}
@@ -2053,35 +2069,24 @@ export default function Chat() {
                 return (
                   <div
                     key={msg.id}
-                    className="w-full"
-                    style={{ textAlign: msg.role === 'user' ? 'right' : 'left' }}
+                    className={`flex w-full mb-6 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
-                      className={`inline-block max-w-[85%] px-3 py-2 rounded-md text-left ${msg.role === 'user'
-                        ? 'bg-zinc-800 text-gray-200 border border-white/5'
-                        : 'bg-transparent text-gray-300'
+                      className={`max-w-[85%] relative group ${msg.role === 'user'
+                        ? 'bg-zinc-800 border border-white/10 rounded-2xl rounded-tr-none px-4 py-3'
+                        : 'bg-transparent w-full'
                         }`}
                     >
                       {msg.role === 'user' ? (
-                        <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                        <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                       ) : (
                         !msg.toolCalls && (() => {
-                          // Show the tool activity pill on the in-flight streaming message.
                           const isStreamingMsg = msg.id === 'streaming';
-
-                          // ── Tools Used Header ──────────────────────────────
-                          // For streaming: use the accumulated streamingToolCalls.
-                          // For loaded history: scan backwards to find tool calls
-                          // that happened in the same agent turn as this response.
                           const toolsForHeader: ToolCallSummaryItem[] = isStreamingMsg
                             ? streamingToolCalls
                             : getToolsUsedBeforeMessage(allMessages, index);
 
-                          // Strip any residual JSON tool-call blobs from the displayed content
                           let cleaned = msg.content || '';
-                          // ── JSON Unwrap ────────────────────────────────────
-                          // Local models in JSON mode often output {"response":"..."}
-                          // instead of plain text. Detect and unwrap single-key wrappers.
                           try {
                             const trimmed = cleaned.trim();
                             if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
@@ -2094,22 +2099,22 @@ export default function Chat() {
                                 }
                               }
                             }
-                          } catch { /* not JSON, use as-is */ }
-                          // Strip residual JSON tool-call blobs and agentic step markers.
+                          } catch { }
                           cleaned = cleaned.replace(/\{[\s\S]*?"name"\s*:\s*".*?"[\s\S]*?"arguments"\s*:\s*\{[\s\S]*?\}\s*\}/g, '').trim();
                           cleaned = cleaned
                             .replace(/\[STEP_START:\d+\]\n?/g, '')
                             .replace(/\[STEP_DONE:\d+\]\n?/g, '')
                             .replace(/\[AGENTIC_GOAL_REACHED:[^\]]+\]\n?/g, '')
                             .trim();
+
                           if (!cleaned && !(isStreamingMsg && (toolPillTool || activeStage)) && toolsForHeader.length === 0) return null;
+
                           return (
-                            <>
-                              {/* Tools used header — always at the top of the response */}
+                            <div className="space-y-4">
                               <ToolsUsedHeader tools={toolsForHeader} />
 
                               {cleaned ? (
-                                <div className="text-sm prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-code:bg-white/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-cyan-300 prose-code:font-mono prose-code:text-xs prose-pre:bg-black prose-pre:border prose-pre:border-white/10 prose-pre:rounded-md prose-pre:text-gray-300 prose-pre:p-3 prose-a:text-cyan-400 prose-strong:text-white prose-blockquote:border-cyan-500/30 prose-blockquote:text-gray-400">
+                                <div className="text-sm text-gray-300 leading-relaxed prose prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-code:bg-white/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-cyan-300 prose-code:before:content-none prose-code:after:content-none prose-pre:bg-transparent prose-pre:p-0">
                                   <ReactMarkdown
                                     remarkPlugins={[remarkGfm]}
                                     components={{
@@ -2120,16 +2125,17 @@ export default function Chat() {
                                   </ReactMarkdown>
                                 </div>
                               ) : null}
+
                               {isStreamingMsg && toolPillTool && (
                                 <ToolActivityPill tool={toolPillTool} server={toolPillServer} />
                               )}
                               {isStreamingMsg && !toolPillTool && activeStage && (
-                                <div className="flex items-center gap-2 mt-2 px-3 py-1.5 bg-zinc-800/60 border border-white/10 rounded-full w-fit text-[11px] font-mono text-gray-400">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-pulse shrink-0" />
+                                <div className="flex items-center gap-2 mt-2 px-3 py-1.5 bg-zinc-900 border border-white/10 rounded-full w-fit text-[11px] font-mono text-gray-400">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0 shadow-[0_0_8px_rgba(6,182,212,0.5)]" />
                                   {activeStage}
                                 </div>
                               )}
-                            </>
+                            </div>
                           );
                         })()
                       )}

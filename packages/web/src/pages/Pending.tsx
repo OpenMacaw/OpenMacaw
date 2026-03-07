@@ -53,8 +53,14 @@ export default function Pending() {
   };
 
   return (
-    <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-black/50 border border-white/10 rounded-2xl p-8 relative overflow-hidden flex flex-col items-center">
+    <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      {/* Decorative Background */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-[25%] -left-[10%] w-[700px] h-[700px] bg-cyan-500/10 rounded-full blur-[120px]" />
+        <div className="absolute -bottom-[25%] -right-[10%] w-[600px] h-[600px] bg-amber-500/10 rounded-full blur-[120px]" />
+      </div>
+
+      <div className="w-full max-w-sm bg-zinc-950/50 backdrop-blur-xl border border-white/10 rounded-2xl p-8 relative z-10 shadow-2xl flex flex-col items-center">
         
         <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mb-6 border border-amber-500/20">
           <ShieldAlert className="w-8 h-8 text-amber-500" />

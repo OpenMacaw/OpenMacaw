@@ -11,6 +11,7 @@ import Settings from './pages/Settings';
 import Pipelines from './pages/Pipelines';
 import Catalog from './pages/Catalog';
 import Admin from './pages/Admin';
+import Forbidden from './pages/Forbidden';
 import Auth from './pages/Auth';
 import Pending from './pages/Pending';
 import { AuthProvider, ProtectedRoute, AdminRoute } from './contexts/AuthContext';
@@ -70,6 +71,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="activity" element={<AuditLog />} />
             <Route path="settings" element={<Settings />} />
             <Route path="catalog" element={<Catalog />} />
+            <Route path="forbidden" element={<Forbidden />} />
             <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
