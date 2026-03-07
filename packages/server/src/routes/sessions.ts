@@ -107,4 +107,18 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
     db.delete(schema.messages as any).where((col: (k: string) => unknown) => col('sessionId') === id);
     return reply.send({ success: true, cleared: true });
   });
+
+  fastify.delete('/api/sessions/:id/messages/:messageId', async (request: FastifyRequest<{ Params: { id: string, messageId: string } }>, reply: FastifyReply) => {
+    const { id, messageId } = request.params;
+    const userId = (request as any).user.id;
+
+    const session = getSession(id, userId);
+    if (!session) {
+      return reply.code(404).send({ error: 'Session not found' });
+    }
+
+    const db = getDb();
+    db.delete(schema.messages as any).where((col: (k: string) => any) => col('id') === messageId && col('sessionId') === id);
+    return reply.send({ success: true, deleted: true });
+  });
 }

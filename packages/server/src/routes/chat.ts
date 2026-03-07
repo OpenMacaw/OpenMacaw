@@ -14,6 +14,12 @@ const chatSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('join'),
     sessionId: z.string(),
+  }),
+  z.object({
+    type: z.literal('regenerate'),
+    sessionId: z.string(),
+    model: z.string().optional(),
+    mode: z.enum(['build', 'plan']).optional(),
   })
 ]);
 
@@ -106,6 +112,43 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
             sessionAbortControllers.delete(sessionId);
           }
 
+        } else if (parsed.type === 'regenerate') {
+          const { sessionId, model, mode } = parsed;
+          console.log('[WebSocket] Regenerate session:', sessionId);
+
+          socketRegistry.set(sessionId, sendEvent);
+          const session = getSession(sessionId);
+          if (!session) {
+            sendEvent({ type: 'error', message: 'Session not found' });
+            return;
+          }
+
+          const config = getActiveSettingsForUser(session.userId);
+          const abortCtrl = new AbortController();
+          sessionAbortControllers.set(sessionId, abortCtrl);
+
+          const liveEventHandler = (event: AgentEvent) => {
+            const handler = socketRegistry.get(sessionId);
+            if (handler) {
+              handler(event);
+            }
+          };
+
+          try {
+            await createAgentRuntime(
+              {
+                sessionId,
+                model: model || session.model || config.DEFAULT_MODEL,
+                personality: session.personality || config.PERSONALITY,
+                mode: mode || session.mode,
+                maxSteps: config.MAX_STEPS,
+                signal: abortCtrl.signal,
+              },
+              liveEventHandler
+            ).run(); // No message passed = regenerate from history
+          } finally {
+            sessionAbortControllers.delete(sessionId);
+          }
         } else if (parsed.type === 'join') {
           const { sessionId } = parsed;
           console.log('[WebSocket] Join session:', sessionId);

@@ -159,8 +159,9 @@ export function ChatInput({
 
   // ── Arrow-Up history recall ───────────────────────────────────────────────
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Submit on Enter (no Shift)
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Submit on Enter (no Shift) or Cmd/Ctrl+Enter
+    const isModEnter = (e.metaKey || e.ctrlKey) && e.key === 'Enter';
+    if ((e.key === 'Enter' && !e.shiftKey) || isModEnter) {
       e.preventDefault();
       if (!value.trim() || isStreaming) return;
       // Push to history
@@ -405,10 +406,13 @@ export function ChatInput({
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             placeholder="Type a message or /command..."
-            className={`w-full px-3 py-2.5 bg-zinc-950 border text-gray-200 rounded-md resize-none focus:outline-none focus:ring-1 shadow-sm text-sm overflow-y-auto transition-colors ${isDragging
+            className={`w-full px-3 py-2.5 bg-zinc-950 border text-gray-200 rounded-md resize-none focus:outline-none focus:ring-1 shadow-sm text-sm overflow-y-auto transition-all ${
+              isDragging
                 ? 'border-cyan-500/80 ring-cyan-500/40'
-                : 'border-white/10 focus:border-cyan-500/50 focus:ring-cyan-500/50'
-              }`}
+                : agenticOpen
+                  ? 'border-violet-500/50 ring-violet-500/30 animate-pulse-glow shadow-[0_0_15px_rgba(139,92,246,0.2)]'
+                  : 'border-white/10 focus:border-cyan-500/50 focus:ring-cyan-500/50'
+            }`}
             style={{ maxHeight: '200px' }}
             rows={1}
             disabled={isStreaming}

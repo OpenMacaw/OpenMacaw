@@ -145,6 +145,11 @@ export function deleteSession(id: string, userId?: string): void {
   }
 }
 
+export function deleteMessage(messageId: string, sessionId: string): void {
+  const db = getDb();
+  db.delete(schema.messages as any).where((getCol: (col: string) => any) => getCol('id') === messageId && getCol('sessionId') === sessionId);
+}
+
 /**
  * Ensures at least one session exists in the database.
  * Called at server startup so the web UI always has a conversation to open.

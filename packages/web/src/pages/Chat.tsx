@@ -4,6 +4,8 @@ import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/rea
 import { Trash2, Loader2, Bird, Check, Copy, AlertTriangle, X, Wrench, ChevronDown, ChevronUp, Zap, Bot, GripVertical, Flag, Plus } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { apiFetch, getWsUrl, type AgentEvent } from '../api';
 import { ChatInput } from '../components/ChatInput';
 import { notifyAgentDoneAsync, notifyToolDeniedAsync } from '../lib/notifications';
@@ -1692,6 +1694,52 @@ export default function Chat() {
       handleSend();
     }
   };
+ 
+  const handleRegenerate = async (messageId: string) => {
+    if (!currentSessionId || isStreaming) return;
+ 
+    // Find the message being regenerated and the last user message before it
+    const msgs = currentSession?.messages || [];
+    const idx = msgs.findIndex(m => m.id === messageId);
+    if (idx === -1) return;
+ 
+    // Find the nearest preceding user message
+    let lastUserPrompt = '';
+    for (let i = idx - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') {
+        lastUserPrompt = msgs[i].content;
+        break;
+      }
+    }
+ 
+    if (!lastUserPrompt) return;
+ 
+    try {
+      // 1. Delete the assistant message
+      await apiFetch(`/api/sessions/${currentSessionId}/messages/${messageId}`, { method: 'DELETE' });
+      
+      // 2. Invalidate to clear local UI message list
+      queryClient.invalidateQueries({ queryKey: ['session', currentSessionId] });
+      
+      // 3. Trigger regeneration via special WebSocket signal
+      dispatch({ type: 'START_STREAM' });
+      streamStartRef.current = Date.now();
+
+      let ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        ws = connectWebSocket();
+        wsRef.current = ws;
+      }
+      const openWs = await waitForSocket(ws);
+      openWs.send(JSON.stringify({ 
+        type: 'regenerate', 
+        sessionId: currentSessionId 
+      }));
+    } catch (e) {
+      console.error('[Regenerate] Failed:', e);
+      dispatch({ type: 'RESET_STREAM' });
+    }
+  };
 
   // Quick action handler: auto-create session if needed, then send deterministically
   const sendQuickAction = async (prompt: string) => {
@@ -2114,9 +2162,10 @@ export default function Chat() {
                               <ToolsUsedHeader tools={toolsForHeader} />
 
                               {cleaned ? (
-                                <div className="text-sm text-gray-300 leading-relaxed prose prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-code:bg-white/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-cyan-300 prose-code:before:content-none prose-code:after:content-none prose-pre:bg-transparent prose-pre:p-0">
+                                <div className={`text-sm text-gray-300 gap-4 leading-relaxed prose prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-code:bg-white/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-cyan-300 prose-code:before:content-none prose-code:after:content-none prose-pre:bg-transparent prose-pre:p-0 ${isStreamingMsg ? 'streaming-cursor' : ''}`}>
                                   <ReactMarkdown
-                                    remarkPlugins={[remarkGfm]}
+                                    remarkPlugins={[remarkGfm, remarkMath]}
+                                    rehypePlugins={[rehypeKatex]}
                                     components={{
                                       code: CodeBlock as any,
                                     }}
@@ -2126,16 +2175,40 @@ export default function Chat() {
                                 </div>
                               ) : null}
 
-                              {isStreamingMsg && toolPillTool && (
-                                <ToolActivityPill tool={toolPillTool} server={toolPillServer} />
-                              )}
-                              {isStreamingMsg && !toolPillTool && activeStage && (
-                                <div className="flex items-center gap-2 mt-2 px-3 py-1.5 bg-zinc-900 border border-white/10 rounded-full w-fit text-[11px] font-mono text-gray-400">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0 shadow-[0_0_8px_rgba(6,182,212,0.5)]" />
-                                  {activeStage}
-                                </div>
-                              )}
-                            </div>
+                                {isStreamingMsg && toolPillTool && (
+                                  <ToolActivityPill tool={toolPillTool} server={toolPillServer} />
+                                )}
+                                {isStreamingMsg && !toolPillTool && activeStage && (
+                                  <div className="flex items-center gap-2 mt-2 px-3 py-1.5 bg-zinc-900 border border-white/10 rounded-full w-fit text-[11px] font-mono text-gray-400">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0 shadow-[0_0_8px_rgba(6,182,212,0.5)]" />
+                                    {activeStage}
+                                  </div>
+                                )}
+ 
+                                {/* Assistant Action Bar (visible on hover) */}
+                                {!isStreamingMsg && msg.role === 'assistant' && !isApprovalCard && (
+                                  <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(cleaned);
+                                      }}
+                                      title="Copy message"
+                                      className="p-1.5 rounded hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
+                                    >
+                                      <Copy className="w-3.5 h-3.5" />
+                                    </button>
+                                    {index === allMessages.length - 1 && (
+                                      <button
+                                        onClick={() => handleRegenerate(msg.id)}
+                                        title="Regenerate response"
+                                        className="p-1.5 rounded hover:bg-white/5 text-gray-500 hover:text-violet-400 transition-colors"
+                                      >
+                                        <Zap className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                           );
                         })()
                       )}

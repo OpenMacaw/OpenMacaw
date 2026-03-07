@@ -14,12 +14,15 @@
   "dependencies": {
     "@tanstack/react-query": "^5.17.0",
     "clsx": "^2.1.0",
+    "katex": "^0.16.37",
     "lucide-react": "^0.303.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^6.21.0",
+    "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "zustand": "^4.4.7"
   },
   "devDependencies": {
