@@ -5,6 +5,7 @@ import { getDb, schema } from '../db/index.js';
 import { registerServer, startServer, stopServer, getAllServers, removeServer, getServerTools, pauseAllServers, getMCPServer } from '../mcp/index.js';
 import { createDefaultPermission } from '../permissions/index.js';
 import { activeStreams } from '../agent/runtime.js';
+import { parse as shellParse } from 'shell-quote';
 
 const serverSchema = z.object({
   name: z.string().min(1),
@@ -16,13 +17,42 @@ const serverSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
+// ── Safe argument normalization ───────────────────────────────────────────────
+
+// Known-dangerous command patterns:
+// • Absolute paths to system executables (/bin/sh, /usr/bin/python, etc.)
+// • Shell metacharacters that could chain or inject commands
+// Reject:
+// • Absolute paths to system binary directories (/bin/sh, /usr/bin/python, etc.)
+// • Shell metacharacters that could chain or inject additional commands
+const DANGEROUS_COMMAND_RE = new RegExp(
+  '(\\/(?:bin|sbin|usr\\/bin|usr\\/sbin|usr\\/local\\/bin)\\/|[;&|`]|\\$\\())'
+);
+
+/**
+ * Validates that a command string is safe to spawn. Returns an error string if
+ * the command is dangerous, or null if it looks safe.
+ */
+function validateCommand(cmd: string | undefined): string | null {
+  if (!cmd) return null; // No command = HTTP transport; validated elsewhere
+  if (DANGEROUS_COMMAND_RE.test(cmd)) {
+    return `Command contains disallowed pattern: "${cmd}". ` +
+      'Use npx, node, python3, uvx, or a relative/bare executable name.';
+  }
+  return null;
+}
+
 function normalizeArgs(argsStr?: string): string | undefined {
   if (!argsStr || argsStr.trim() === '') return undefined;
   try {
     const parsed = JSON.parse(argsStr);
     return Array.isArray(parsed) ? JSON.stringify(parsed) : JSON.stringify([String(parsed)]);
   } catch {
-    return JSON.stringify(argsStr.split(' ').filter(Boolean));
+    // Fall back to shell-quote parsing for unquoted CLI-style strings.
+    // shell-quote correctly handles quoted spaces and escape sequences, unlike split(' ').
+    const parsed = shellParse(argsStr)
+      .filter((token): token is string => typeof token === 'string');
+    return JSON.stringify(parsed);
   }
 }
 
@@ -64,6 +94,13 @@ export async function serversRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.post('/api/servers', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = serverSchema.parse(request.body);
+
+    // Validate the command field before registering
+    const cmdError = validateCommand(body.command);
+    if (cmdError) {
+      return reply.code(400).send({ error: cmdError });
+    }
+
     const db = getDb();
     const now = Date.now();
     const id = nanoid();
@@ -136,7 +173,13 @@ export async function serversRoutes(fastify: FastifyInstance): Promise<void> {
 
     const updates: Record<string, unknown> = { updated_at: Date.now() };
     if (body.name !== undefined) updates.name = body.name;
-    if (body.command !== undefined) updates.command = body.command;
+    if (body.command !== undefined) {
+      const cmdError = validateCommand(body.command);
+      if (cmdError) {
+        return reply.code(400).send({ error: cmdError });
+      }
+      updates.command = body.command;
+    }
     if (body.args !== undefined) updates.args = normalizeArgs(body.args);
     if (body.envVars !== undefined) updates.env_vars = normalizeEnvVars(body.envVars);
     if (body.url !== undefined) updates.url = body.url;

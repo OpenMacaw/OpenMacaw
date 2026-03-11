@@ -65,7 +65,7 @@ export async function interceptToolCallAsync(
   }
 
   // ── 1. PermissionGuard ─────────────────────────────────────────────────────
-  const permResult = evaluatePermission({
+  const permResult = await evaluatePermission({
     serverId,
     toolName,
     toolInput: toolCall.input,

@@ -54,6 +54,31 @@ async function buildApp() {
     }
   });
 
+  // ── HTTP Security Headers (à la OWASP ASVS A14) ─────────────────────────────
+  // Applied to every HTML response (the Vite SPA). API JSON responses are
+  // also covered, which is fine — standard browser headers on JSON are harmless.
+  fastify.addHook('onSend', async (_req, reply, payload) => {
+    const ct = reply.getHeader('content-type');
+    const isHtml = typeof ct === 'string' && ct.includes('text/html');
+    if (isHtml) {
+      // 'unsafe-inline' is required because Vite's production build inlines
+      // bootstrap scripts. If the CSP is tightened further (nonce/hash), remove it.
+      reply.header(
+        'Content-Security-Policy',
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: blob:; " +
+        "connect-src 'self' ws: wss:; " +
+        "font-src 'self' data:"
+      );
+    }
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    return payload;
+  });
+
   // Global Auth Middleware
   fastify.addHook('onRequest', async (request, reply) => {
     const url = request.url;

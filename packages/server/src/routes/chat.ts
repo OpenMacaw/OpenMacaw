@@ -47,9 +47,49 @@ export function abortSession(sessionId: string): boolean {
   return false;
 }
 
+// Origins that are allowed to open the WebSocket.
+// Kept in sync with the CORS allow-list in index.ts.
+const WS_ALLOWED_ORIGINS = new Set([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3000',
+  'http://localhost:4000',
+  // Production: same-origin requests have no Origin header — handled below.
+]);
+
 export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
-  fastify.get('/ws/chat', { websocket: true }, (socket, _request) => {
-    console.log('[WebSocket] New connection');
+  fastify.get('/ws/chat', { websocket: true }, async (socket, request) => {
+    // ── 1. JWT authentication ────────────────────────────────────────────────
+    // Accept token via Authorization header OR ?token= query param (WS clients
+    // cannot set arbitrary headers in all environments, so both are supported).
+    try {
+      await request.jwtVerify();
+    } catch {
+      // Try query param fallback
+      const queryToken = (request.query as Record<string, string>)?.token;
+      if (queryToken) {
+        try {
+          await request.jwtVerify({ onlyCookie: false });
+        } catch {
+          socket.close(4001, 'Unauthorized — invalid or missing JWT');
+          return;
+        }
+      } else {
+        socket.close(4001, 'Unauthorized — invalid or missing JWT');
+        return;
+      }
+    }
+
+    // ── 2. Origin validation ─────────────────────────────────────────────────
+    // Browsers always send Origin on cross-origin WS upgrades. A missing Origin
+    // header is only possible for same-origin requests or non-browser clients
+    // (curl, server-to-server) — allow those through.
+    const origin = request.headers.origin;
+    if (origin && !WS_ALLOWED_ORIGINS.has(origin)) {
+      socket.close(4003, 'Forbidden — origin not allowed');
+      return;
+    }
+    console.log('[WebSocket] New authenticated connection');
     socket.on('error', (err) => {
       console.error('[WebSocket] Error:', err);
     });
@@ -67,7 +107,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
 
         if (parsed.type === 'chat') {
           const { sessionId, message: userMessage, model, mode } = parsed;
-          console.log('[WebSocket] Chat message:', userMessage.substring(0, 50), 'session:', sessionId);
+          console.log('[WebSocket] Chat message received for session:', sessionId);
 
           // Register this socket for the session
           socketRegistry.set(sessionId, sendEvent);
@@ -187,47 +227,4 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
     return reply.code(404).send({ stopped: false, error: 'No active stream for this session' });
   });
 
-  // HTTP test endpoint for quick testing without WebSocket
-  fastify.post('/api/chat-test', async (request, reply) => {
-    const body = request.body as { sessionId?: string; message?: string; model?: string };
-    const { sessionId, message, model } = body;
-
-    console.log('[HTTP Test] Chat request:', message?.substring(0, 50), 'session:', sessionId);
-
-    if (!sessionId || !message) {
-      return reply.code(400).send({ error: 'sessionId and message required' });
-    }
-
-    const session = getSession(sessionId);
-    if (!session) {
-      return reply.code(404).send({ error: 'Session not found' });
-    }
-
-    const config = getActiveSettingsForUser(session.userId);
-    const events: AgentEvent[] = [];
-
-    const eventHandler = (event: AgentEvent) => {
-      console.log('[HTTP Test] Event:', event.type);
-      events.push(event);
-    };
-
-    try {
-      await createAgentRuntime(
-        {
-          sessionId,
-          model: model || session.model || config.DEFAULT_MODEL,
-          personality: session.personality || config.PERSONALITY,
-          mode: session.mode,
-          maxSteps: config.MAX_STEPS,
-        },
-        eventHandler
-      ).run(message);
-
-      return reply.send({ events });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[HTTP Test] Error:', errorMessage);
-      return reply.code(500).send({ error: errorMessage, events });
-    }
-  });
 }

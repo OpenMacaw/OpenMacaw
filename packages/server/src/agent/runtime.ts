@@ -371,7 +371,7 @@ export class AgentRuntime {
       input: toolCall.input,
     });
 
-    const permResult = evaluatePermission({
+    const permResult = await evaluatePermission({
       serverId,
       toolName,
       toolInput: toolCall.input,

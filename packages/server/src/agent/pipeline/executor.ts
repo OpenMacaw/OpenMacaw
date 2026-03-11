@@ -120,7 +120,7 @@ export async function executeStep(
                     }
 
                     // Stage 3: PermissionGuard check
-                    const permResult = evaluatePermission({
+                    const permResult = await evaluatePermission({
                         serverId: sId,
                         toolName: tName,
                         toolInput: delta.toolCall.input,

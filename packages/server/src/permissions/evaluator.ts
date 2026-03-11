@@ -1,6 +1,8 @@
 import { getPermissionForServer, type ServerPermission } from './store.js';
 import { getMCPServer } from '../mcp/registry.js';
 import { resolve as resolvePath, relative as relativePath, isAbsolute } from 'node:path';
+import { realpathSync } from 'node:fs';
+import dns from 'node:dns/promises';
 
 export interface PermissionContext {
   serverId: string;
@@ -17,6 +19,31 @@ export type PermissionVerdict = 'ALLOW_SILENT' | 'REQUIRE_APPROVAL' | 'DENY';
 export interface PermissionResult {
   verdict: PermissionVerdict;
   reason?: string;
+}
+
+// ── Private IP detection (SSRF guard) ────────────────────────────────────────
+/**
+ * Returns true if the given IP address is in a private/loopback/link-local
+ * range that should never be reachable via an agent-initiated web fetch.
+ * Covers IPv4 RFC-1918, loopback, link-local, and IPv6 loopback/ULA.
+ */
+function isPrivateIp(ip: string): boolean {
+  // IPv4
+  const v4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const [, a, b] = v4.map(Number);
+    if (a === 10) return true;                 // 10.0.0.0/8
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true;   // 192.168.0.0/16
+    if (a === 127) return true;                // 127.0.0.0/8 loopback
+    if (a === 169 && b === 254) return true;   // 169.254.0.0/16 link-local
+    if (a === 0) return true;                  // 0.0.0.0/8
+    return false;
+  }
+  // IPv6 loopback (::1) and ULA (fc00::/7)
+  if (ip === '::1' || ip === '0:0:0:0:0:0:0:1') return true;
+  if (/^(fc|fd)/i.test(ip)) return true;
+  return false;
 }
 
 // ── Tool classification ───────────────────────────────────────────────────────
@@ -70,7 +97,7 @@ const toolNameToType: Record<string, string> = {
   http_request: 'network',
 };
 
-export function evaluatePermission(context: PermissionContext): PermissionResult {
+export async function evaluatePermission(context: PermissionContext): Promise<PermissionResult> {
   const { serverId, toolName, toolInput } = context;
 
   const server = getMCPServer(serverId);
@@ -98,7 +125,7 @@ export function evaluatePermission(context: PermissionContext): PermissionResult
   }
 
   if (toolType === 'webfetch') {
-    return evaluateWebfetchPermission(permission, toolInput);
+    return await evaluateWebfetchPermission(permission, toolInput);
   }
 
   if (toolType === 'subprocess') {
@@ -125,9 +152,18 @@ export function evaluatePermission(context: PermissionContext): PermissionResult
 function resolveIncomingPath(p: string): string {
   // Normalise back-slashes first (Windows paths from LLM outputs)
   const forward = p.replace(/\\/g, '/');
-  if (isAbsolute(forward)) return resolvePath(forward);
-  // Relative → resolve against the server process CWD
-  return resolvePath(process.cwd(), forward);
+  const resolved = isAbsolute(forward)
+    ? resolvePath(forward)
+    : resolvePath(process.cwd(), forward);
+
+  // Follow symlinks to their real destination so symlink-based escapes are caught.
+  // If the path doesn't exist yet (e.g. a write target), realpathSync will throw;
+  // in that case we fall back to the lexically resolved path.
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
 }
 
 /**
@@ -236,7 +272,7 @@ function evaluateBashPermission(perm: ServerPermission, input: Record<string, un
   return { verdict: 'REQUIRE_APPROVAL' };
 }
 
-function evaluateWebfetchPermission(perm: ServerPermission, input: Record<string, unknown>): PermissionResult {
+async function evaluateWebfetchPermission(perm: ServerPermission, input: Record<string, unknown>): Promise<PermissionResult> {
   if (!perm.webfetchAllowed) {
     return { verdict: 'DENY', reason: 'Web fetch is disabled for this server' };
   }
@@ -246,17 +282,35 @@ function evaluateWebfetchPermission(perm: ServerPermission, input: Record<string
     return { verdict: 'DENY', reason: 'No URL provided' };
   }
 
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return { verdict: 'DENY', reason: 'Invalid URL format' };
+  }
+
+  // ── SSRF guard: resolve the hostname and block internal IP ranges ──────────—
+  // This defeats DNS-rebinding attacks where a public domain temporarily resolves
+  // to an internal IP to bypass the allowlist check that only sees the hostname.
+  try {
+    const { address } = await dns.lookup(parsedUrl.hostname, { family: 4 });
+    if (isPrivateIp(address)) {
+      return {
+        verdict: 'DENY',
+        reason: `SSRF blocked: ${parsedUrl.hostname} resolves to private/internal IP ${address}`,
+      };
+    }
+  } catch {
+    // DNS resolution failed — allow the allowlist check to proceed; the actual
+    // HTTP client will fail the request if the host is unreachable.
+  }
+
   if (perm.webfetchAllowedDomains.length > 0) {
-    try {
-      const urlObj = new URL(url);
-      const matches = perm.webfetchAllowedDomains.some(domain => 
-        urlObj.hostname === domain || urlObj.hostname.endsWith(`.${domain}`)
-      );
-      if (!matches) {
-        return { verdict: 'DENY', reason: `Domain ${urlObj.hostname} is not in allowed domains` };
-      }
-    } catch {
-      return { verdict: 'DENY', reason: 'Invalid URL format' };
+    const matches = perm.webfetchAllowedDomains.some(domain =>
+      parsedUrl.hostname === domain || parsedUrl.hostname.endsWith(`.${domain}`)
+    );
+    if (!matches) {
+      return { verdict: 'DENY', reason: `Domain ${parsedUrl.hostname} is not in allowed domains` };
     }
   }
 

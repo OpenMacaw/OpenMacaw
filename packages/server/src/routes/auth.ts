@@ -4,8 +4,59 @@ import * as schema from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcrypt';
 import { nanoid } from 'nanoid';
+import Database from 'better-sqlite3';
 
-const loginAttempts = new Map<string, { count: number, resetAt: number }>();
+// ── Persistent login rate limiter (SQLite-backed) ─────────────────────────────
+// Uses better-sqlite3 directly for atomic, synchronous read-modify-write.
+// Falls back to allow-through if the DB connection is unavailable.
+
+let _rateLimitDb: Database.Database | null = null;
+
+function getRateLimitDb(): Database.Database {
+  if (_rateLimitDb) return _rateLimitDb;
+  const dbPath = process.env.DATABASE_URL || './data/app.db';
+  _rateLimitDb = new Database(dbPath);
+  _rateLimitDb.pragma('journal_mode = WAL');
+  _rateLimitDb.exec(`
+    CREATE TABLE IF NOT EXISTS login_attempts (
+      key   TEXT PRIMARY KEY,
+      count INTEGER NOT NULL DEFAULT 0,
+      reset_at INTEGER NOT NULL
+    )
+  `);
+  return _rateLimitDb;
+}
+
+/**
+ * Returns true and increments the counter if the request should be rate-limited.
+ * The window is 60 seconds; limit is 5 attempts per (IP, email) pair.
+ */
+function checkAndIncrementLoginAttempts(key: string): boolean {
+  const db = getRateLimitDb();
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const limit = 5;
+
+  const row = db.prepare('SELECT count, reset_at FROM login_attempts WHERE key = ?').get(key) as
+    | { count: number; reset_at: number }
+    | undefined;
+
+  if (!row || now > row.reset_at) {
+    // First attempt in this window — upsert with count=1
+    db.prepare(
+      'INSERT INTO login_attempts (key, count, reset_at) VALUES (?, 1, ?)'
+      + ' ON CONFLICT(key) DO UPDATE SET count = 1, reset_at = excluded.reset_at'
+    ).run(key, now + windowMs);
+    return false; // not rate-limited
+  }
+
+  if (row.count >= limit) {
+    return true; // rate-limited, do not increment further
+  }
+
+  db.prepare('UPDATE login_attempts SET count = count + 1 WHERE key = ?').run(key);
+  return false; // allowed, counter incremented
+}
 
 export async function authRoutes(fastify: FastifyInstance) {
   fastify.get('/api/auth/status', async (_request, _reply) => {
@@ -57,7 +108,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     const passwordHash = await bcrypt.hash(password, 10);
     const id = nanoid();
 
-    console.log('[DEBUG] Registering new user. Forced Role:', role);
+    // (registration details intentionally not logged)
 
     await db.insert(schema.users).values({
       id,
@@ -84,21 +135,10 @@ export async function authRoutes(fastify: FastifyInstance) {
     }
 
     const ip = request.ip || 'unknown';
-    const rateLimitKey = `${ip}-${email}`;
-    const now = Date.now();
-    
-    if (loginAttempts.has(rateLimitKey)) {
-      const attempt = loginAttempts.get(rateLimitKey)!;
-      if (now > attempt.resetAt) {
-        loginAttempts.set(rateLimitKey, { count: 1, resetAt: now + 60 * 1000 });
-      } else {
-        if (attempt.count >= 5) {
-          return reply.code(429).send({ error: 'Too many requests. Please wait a minute.' });
-        }
-        attempt.count += 1;
-      }
-    } else {
-      loginAttempts.set(rateLimitKey, { count: 1, resetAt: now + 60 * 1000 });
+    const rateLimitKey = `${ip}:${email.toLowerCase()}`;
+
+    if (checkAndIncrementLoginAttempts(rateLimitKey)) {
+      return reply.code(429).send({ error: 'Too many requests. Please wait a minute.' });
     }
 
     const db = getDrizzleDb();
@@ -109,7 +149,7 @@ export async function authRoutes(fastify: FastifyInstance) {
       return reply.code(401).send({ error: 'Invalid credentials' });
     }
 
-    console.log('[DEBUG] Auth attempt for:', email, 'User Role:', user.role);
+    // (auth attempt details intentionally not logged)
 
     if (user.role === 'pending') {
       return reply.code(403).send({ message: 'Account Activation Pending' });
