@@ -55,6 +55,15 @@ const SAFE_READ_TOOLS = new Set([
   'read_multiple_files', 'get_file_info',
 ]);
 
+// Read-only web tools: may be silenced when autoApproveReads is enabled.
+// These only fetch/search data and never modify external state.
+const SAFE_WEB_READ_TOOLS = new Set([
+  'searxng_web_search', 'searxng_search', 'searxng',
+  'web_url_read', 'url_read', 'read_url', 'browse', 'browse_url',
+  'search', 'web_search', 'search_web', 'google_search', 'serpapi_search',
+  'webfetch', 'fetch_url', 'open_url',
+]);
+
 // Destructive: MUST ALWAYS require approval — never silenced
 const DESTRUCTIVE_TOOLS = new Set([
   'write_file', 'create_file', 'delete_file', 'delete_directory',
@@ -92,6 +101,13 @@ const toolNameToType: Record<string, string> = {
   // SearXNG MCP server (mcp-server-searxng)
   searxng_search: 'webfetch',
   searxng: 'webfetch',
+  searxng_web_search: 'webfetch',
+  // URL reading / browsing
+  web_url_read: 'webfetch',
+  url_read: 'webfetch',
+  read_url: 'webfetch',
+  browse: 'webfetch',
+  browse_url: 'webfetch',
   // Subprocess / network meta
   subprocess: 'subprocess',
   spawn: 'subprocess',
@@ -127,7 +143,7 @@ export async function evaluatePermission(context: PermissionContext): Promise<Pe
   }
 
   if (toolType === 'webfetch') {
-    return await evaluateWebfetchPermission(permission, toolInput);
+    return await evaluateWebfetchPermission(permission, toolName, toolInput);
   }
 
   if (toolType === 'subprocess') {
@@ -151,7 +167,7 @@ export async function evaluatePermission(context: PermissionContext): Promise<Pe
     return { verdict: 'DENY', reason: 'Environment variable access is permanently disabled' };
   }
 
-  return { verdict: 'REQUIRE_APPROVAL' };
+  return permission.autoApproveAll ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
 }
 
 // ── Path utilities ────────────────────────────────────────────────────────────
@@ -242,7 +258,14 @@ function evaluateFilesystemPermission(
   // ── Trust Policy: ALLOW_SILENT check ────────────────────────────────────
   // Destructive tools can NEVER be silenced, regardless of trust policy
   if (DESTRUCTIVE_TOOLS.has(toolName)) {
-    return { verdict: 'REQUIRE_APPROVAL' };
+    return perm.autoApproveAll
+      ? { verdict: 'ALLOW_SILENT' }
+      : { verdict: 'REQUIRE_APPROVAL' };
+  }
+
+  // Auto-approve ALL: when enabled, every permitted tool call executes silently.
+  if (perm.autoApproveAll) {
+    return { verdict: 'ALLOW_SILENT' };
   }
 
   // Safe reads in a trusted path → execute without prompting.
@@ -282,49 +305,60 @@ function evaluateBashPermission(perm: ServerPermission, input: Record<string, un
     }
   }
 
-  return { verdict: 'REQUIRE_APPROVAL' };
+  return perm.autoApproveAll ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
 }
 
-async function evaluateWebfetchPermission(perm: ServerPermission, input: Record<string, unknown>): Promise<PermissionResult> {
+async function evaluateWebfetchPermission(perm: ServerPermission, toolName: string, input: Record<string, unknown>): Promise<PermissionResult> {
   if (!perm.webfetchAllowed) {
     return { verdict: 'DENY', reason: 'Web fetch is disabled for this server' };
   }
 
   const url = (input.url as string) || (input.uri as string);
-  if (!url) {
-    return { verdict: 'DENY', reason: 'No URL provided' };
-  }
 
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(url);
-  } catch {
-    return { verdict: 'DENY', reason: 'Invalid URL format' };
-  }
-
-  // ── SSRF guard: resolve the hostname and block internal IP ranges ──────────—
-  // This defeats DNS-rebinding attacks where a public domain temporarily resolves
-  // to an internal IP to bypass the allowlist check that only sees the hostname.
-  try {
-    const { address } = await dns.lookup(parsedUrl.hostname, { family: 4 });
-    if (isPrivateIp(address)) {
-      return {
-        verdict: 'DENY',
-        reason: `SSRF blocked: ${parsedUrl.hostname} resolves to private/internal IP ${address}`,
-      };
+  // Some tools (e.g. searxng_web_search) use a query param instead of a URL.
+  // Only validate URL/SSRF/domain when a URL is actually provided.
+  if (url) {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return { verdict: 'DENY', reason: 'Invalid URL format' };
     }
-  } catch {
-    // DNS resolution failed — allow the allowlist check to proceed; the actual
-    // HTTP client will fail the request if the host is unreachable.
+
+    // ── SSRF guard: resolve the hostname and block internal IP ranges ─────────
+    // This defeats DNS-rebinding attacks where a public domain temporarily resolves
+    // to an internal IP to bypass the allowlist check that only sees the hostname.
+    try {
+      const { address } = await dns.lookup(parsedUrl.hostname, { family: 4 });
+      if (isPrivateIp(address)) {
+        return {
+          verdict: 'DENY',
+          reason: `SSRF blocked: ${parsedUrl.hostname} resolves to private/internal IP ${address}`,
+        };
+      }
+    } catch {
+      // DNS resolution failed — allow the allowlist check to proceed; the actual
+      // HTTP client will fail the request if the host is unreachable.
+    }
+
+    if (perm.webfetchAllowedDomains.length > 0) {
+      const matches = perm.webfetchAllowedDomains.some(domain =>
+        parsedUrl.hostname === domain || parsedUrl.hostname.endsWith(`.${domain}`)
+      );
+      if (!matches) {
+        return { verdict: 'DENY', reason: `Domain ${parsedUrl.hostname} is not in allowed domains` };
+      }
+    }
   }
 
-  if (perm.webfetchAllowedDomains.length > 0) {
-    const matches = perm.webfetchAllowedDomains.some(domain =>
-      parsedUrl.hostname === domain || parsedUrl.hostname.endsWith(`.${domain}`)
-    );
-    if (!matches) {
-      return { verdict: 'DENY', reason: `Domain ${parsedUrl.hostname} is not in allowed domains` };
-    }
+  if (perm.autoApproveAll) {
+    return { verdict: 'ALLOW_SILENT' };
+  }
+
+  // Auto-approve read-only web tools (search, URL read) when autoApproveReads
+  // is enabled. These tools only fetch/search data and never modify external state.
+  if (perm.autoApproveReads && SAFE_WEB_READ_TOOLS.has(toolName)) {
+    return { verdict: 'ALLOW_SILENT' };
   }
 
   return { verdict: 'REQUIRE_APPROVAL' };
@@ -334,14 +368,14 @@ function evaluateSubprocessPermission(perm: ServerPermission): PermissionResult 
   if (!perm.subprocessAllowed) {
     return { verdict: 'DENY', reason: 'Subprocess spawning is disabled for this server' };
   }
-  return { verdict: 'REQUIRE_APPROVAL' };
+  return perm.autoApproveAll ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
 }
 
 function evaluateNetworkPermission(perm: ServerPermission): PermissionResult {
   if (!perm.networkAllowed) {
     return { verdict: 'DENY', reason: 'Network access is disabled for this server' };
   }
-  return { verdict: 'REQUIRE_APPROVAL' };
+  return perm.autoApproveAll ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
 }
 
 function matchesGlob(str: string, pattern: string): boolean {
