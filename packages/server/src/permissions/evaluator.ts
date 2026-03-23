@@ -48,27 +48,6 @@ export function isPrivateIp(ip: string): boolean {
   return false;
 }
 
-// ── Tool classification ───────────────────────────────────────────────────────
-// Safe reads: may be silenced when path is trusted
-const SAFE_READ_TOOLS = new Set([
-  'read_file', 'read_directory', 'list_directory', 'read_text_file',
-  'read_multiple_files', 'get_file_info',
-]);
-
-// Read-only web tools: may be silenced when autoApproveReads is enabled.
-// These only fetch/search data and never modify external state.
-const SAFE_WEB_READ_TOOLS = new Set([
-  'searxng_web_search', 'searxng_search', 'searxng',
-  'web_url_read', 'url_read', 'read_url', 'browse', 'browse_url',
-  'search', 'web_search', 'search_web', 'google_search', 'serpapi_search',
-  'webfetch', 'fetch_url', 'open_url',
-]);
-
-// Destructive: MUST ALWAYS require approval — never silenced
-const DESTRUCTIVE_TOOLS = new Set([
-  'write_file', 'create_file', 'delete_file', 'delete_directory',
-  'create_directory', 'move_file', 'rename_file',
-]);
 
 const toolNameToType: Record<string, string> = {
   // Filesystem tools
@@ -139,7 +118,7 @@ export async function evaluatePermission(context: PermissionContext): Promise<Pe
   }
 
   if (toolType === 'bash') {
-    return evaluateBashPermission(permission, toolInput);
+    return evaluateBashPermission(permission, toolName, toolInput);
   }
 
   if (toolType === 'webfetch') {
@@ -147,11 +126,11 @@ export async function evaluatePermission(context: PermissionContext): Promise<Pe
   }
 
   if (toolType === 'subprocess') {
-    return evaluateSubprocessPermission(permission);
+    return evaluateSubprocessPermission(permission, toolName);
   }
 
   if (toolType === 'network') {
-    return evaluateNetworkPermission(permission);
+    return evaluateNetworkPermission(permission, toolName);
   }
 
   // Expanded env parameter detection — blocks common synonyms for environment
@@ -167,7 +146,7 @@ export async function evaluatePermission(context: PermissionContext): Promise<Pe
     return { verdict: 'DENY', reason: 'Environment variable access is permanently disabled' };
   }
 
-  return permission.autoApproveAll ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
+  return permission.toolAutoApprove[toolName] ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
 }
 
 // ── Path utilities ────────────────────────────────────────────────────────────
@@ -255,40 +234,11 @@ function evaluateFilesystemPermission(
     return { verdict: 'DENY', reason: 'Delete permission not granted' };
   }
 
-  // ── Trust Policy: ALLOW_SILENT check ────────────────────────────────────
-  // Destructive tools can NEVER be silenced, regardless of trust policy
-  if (DESTRUCTIVE_TOOLS.has(toolName)) {
-    return perm.autoApproveAll
-      ? { verdict: 'ALLOW_SILENT' }
-      : { verdict: 'REQUIRE_APPROVAL' };
-  }
-
-  // Auto-approve ALL: when enabled, every permitted tool call executes silently.
-  if (perm.autoApproveAll) {
-    return { verdict: 'ALLOW_SILENT' };
-  }
-
-  // Safe reads in a trusted path → execute without prompting.
-  // Trusted path '.' expands to process.cwd(), so LLM requests like '.'
-  // or './src' match automatically once the user adds '.' to trusted dirs.
-  if (
-    perm.autoApproveReads &&
-    SAFE_READ_TOOLS.has(toolName) &&
-    perm.trustedPaths.length > 0
-  ) {
-    const isTrusted = perm.trustedPaths.some(tp => {
-      const absTrusted = resolveIncomingPath(tp); // resolves '.' → process.cwd()
-      return isPathUnder(absPath, absTrusted);
-    });
-    if (isTrusted) {
-      return { verdict: 'ALLOW_SILENT' };
-    }
-  }
-
-  return { verdict: 'REQUIRE_APPROVAL' };
+  // ── Trust Policy: per-tool auto-approve ─────────────────────────────────
+  return perm.toolAutoApprove[toolName] ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
 }
 
-function evaluateBashPermission(perm: ServerPermission, input: Record<string, unknown>): PermissionResult {
+function evaluateBashPermission(perm: ServerPermission, toolName: string, input: Record<string, unknown>): PermissionResult {
   if (!perm.bashAllowed) {
     return { verdict: 'DENY', reason: 'Bash execution is disabled for this server' };
   }
@@ -305,7 +255,7 @@ function evaluateBashPermission(perm: ServerPermission, input: Record<string, un
     }
   }
 
-  return perm.autoApproveAll ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
+  return perm.toolAutoApprove[toolName] ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
 }
 
 async function evaluateWebfetchPermission(perm: ServerPermission, toolName: string, input: Record<string, unknown>): Promise<PermissionResult> {
@@ -351,31 +301,21 @@ async function evaluateWebfetchPermission(perm: ServerPermission, toolName: stri
     }
   }
 
-  if (perm.autoApproveAll) {
-    return { verdict: 'ALLOW_SILENT' };
-  }
-
-  // Auto-approve read-only web tools (search, URL read) when autoApproveReads
-  // is enabled. These tools only fetch/search data and never modify external state.
-  if (perm.autoApproveReads && SAFE_WEB_READ_TOOLS.has(toolName)) {
-    return { verdict: 'ALLOW_SILENT' };
-  }
-
-  return { verdict: 'REQUIRE_APPROVAL' };
+  return perm.toolAutoApprove[toolName] ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
 }
 
-function evaluateSubprocessPermission(perm: ServerPermission): PermissionResult {
+function evaluateSubprocessPermission(perm: ServerPermission, toolName: string): PermissionResult {
   if (!perm.subprocessAllowed) {
     return { verdict: 'DENY', reason: 'Subprocess spawning is disabled for this server' };
   }
-  return perm.autoApproveAll ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
+  return perm.toolAutoApprove[toolName] ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
 }
 
-function evaluateNetworkPermission(perm: ServerPermission): PermissionResult {
+function evaluateNetworkPermission(perm: ServerPermission, toolName: string): PermissionResult {
   if (!perm.networkAllowed) {
     return { verdict: 'DENY', reason: 'Network access is disabled for this server' };
   }
-  return perm.autoApproveAll ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
+  return perm.toolAutoApprove[toolName] ? { verdict: 'ALLOW_SILENT' } : { verdict: 'REQUIRE_APPROVAL' };
 }
 
 function matchesGlob(str: string, pattern: string): boolean {

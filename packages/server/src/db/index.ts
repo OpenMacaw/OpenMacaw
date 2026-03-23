@@ -323,6 +323,11 @@ export function initDatabase(): void {
     sqlite.exec("ALTER TABLE permissions ADD COLUMN auto_approve_all INTEGER DEFAULT 0");
   } catch (e) { /* column already exists */ }
 
+  // ── Per-tool auto-approve map (replaces auto_approve_reads / auto_approve_all) ──
+  try {
+    sqlite.exec("ALTER TABLE permissions ADD COLUMN tool_auto_approve TEXT DEFAULT '{}'");
+  } catch (e) { /* column already exists */ }
+
   // ── Phase 64: Last Active tracking ──────────────────────────────────────
   try {
     sqlite.exec("ALTER TABLE users ADD COLUMN last_active INTEGER");
