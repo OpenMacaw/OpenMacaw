@@ -235,4 +235,119 @@ OpenClaw had browser-upload path traversal allowing writes outside intended dire
 
 ---
 
+---
+
+## 🧩 Skills System
+
+> **Current state**: Agent behavior is defined entirely by the global/session system prompt and MCP server tool descriptions. There is no way to save, share, or reuse task-specific instruction sets across sessions. OpenClaw's "ClawHub Skills" solved this but allowed arbitrary command execution — OpenMacaw's approach is instruction-only, with all tool calls still gated through the PermissionGuard.
+> **Implementation order**: Skills System → Scheduled Automation → Self-Improving Agent.
+
+### Database
+- [ ] **Add `skills` table** — columns: `id` (UUID PK), `name` (text, unique per scope), `description` (text), `instructions` (text — markdown body), `toolHints` (JSON — suggested MCP tools the skill works best with), `triggers` (JSON — slash-command names, keyword patterns), `userId` (nullable FK → `users.id` — `NULL` = workspace-global), `isGlobal` (boolean), `enabled` (boolean, default true), `createdAt`, `updatedAt`
+- [ ] **Add `skill_versions` table** — columns: `id`, `skillId` (FK), `version` (integer, auto-increment per skill), `instructions` (text — snapshot of instructions at this version), `changedBy` (FK → `users.id`), `changeNote` (text, nullable), `createdAt` — append-only history for rollback and audit
+
+### Agent Runtime Integration
+- [ ] **Skill loader in agent runtime** — before each LLM call, query active skills for the current session/user and concatenate their `instructions` into the system prompt (integration point: `runtime.ts` where `session.systemPrompt` is already injected). Skills append after the base system prompt, separated by `---` delimiters with skill name headers
+- [ ] **Per-session skill activation** — sessions can enable/disable individual skills; store as a JSON array of skill IDs on the session or in a `session_skills` join table
+- [ ] **Tool hint injection** — when a skill declares `toolHints`, include a note in the system prompt suggesting the agent use those specific MCP tools for the skill's task
+- [ ] **Slash-command trigger in chat input** — if a skill declares triggers (e.g. `/summarize`, `/review`), intercept the chat input, match against registered triggers, and prepend the skill's instructions to the user message before sending to the agent
+
+### API Routes (`/api/skills`)
+- [ ] `GET /api/skills` — list skills visible to the authenticated user (own + global); support `?search=`, `?global=`, `?enabled=` query filters
+- [ ] `POST /api/skills` — create a skill; non-admins can only create personal skills (`userId` = self, `isGlobal` = false); admins can create global skills
+- [ ] `PUT /api/skills/:id` — update a skill; creates a new `skill_versions` entry before overwriting `instructions`
+- [ ] `DELETE /api/skills/:id` — soft-delete or hard-delete a skill; only the owner or an admin can delete
+- [ ] `GET /api/skills/:id/versions` — list version history for a skill
+- [ ] `POST /api/skills/:id/revert/:versionId` — revert a skill's instructions to a previous version
+
+### Web UI — Skills Management Page
+- [ ] **Skills page** (`/skills`) — paginated list of all accessible skills with search, filter by scope (personal / global), and enable/disable toggles
+- [ ] **Skill editor** — create/edit form with name, description, markdown instructions editor (with preview), tool hints multi-select (populated from registered MCP tools), trigger configuration
+- [ ] **Skill detail view** — read-only view with version history timeline and diff viewer
+- [ ] **Session skill picker** — in the chat UI, add a skill selector (popover or sidebar panel) to activate/deactivate skills for the current session
+- [ ] **Sidebar integration** — show active skill count badge on the chat input area; click to manage
+
+### Import / Export
+- [ ] **Skill import from SKILL.md** — parse markdown files with YAML frontmatter (`name`, `description`, `triggers`, `toolHints`) into the `skills` table; support drag-and-drop upload or file picker on the Skills page. Compatible with OpenClaw's SKILL.md format
+- [ ] **Skill export to markdown** — download a skill as a `.md` file with YAML frontmatter for portability and version control
+- [ ] **Bulk import from directory** — scan a folder for `*.skill.md` files and batch-import
+
+### Scoping & Permissions
+- [ ] **Per-user vs workspace-global scoping** — admins can create global skills visible to all users; regular users can only create personal skills scoped to their `userId`
+- [ ] **Skill visibility rules** — users see their own skills + all enabled global skills; admins see everything with an owner filter
+- [ ] **Skill approval for global promotion** — optional workflow: user submits a personal skill for global promotion → admin reviews and approves/rejects
+
+### Versioning
+- [ ] **Automatic version tracking** — every update to a skill's `instructions` field creates a `skill_versions` entry with the previous content, version number, and author
+- [ ] **Diff viewer in UI** — show side-by-side or inline diff between any two versions of a skill
+- [ ] **Rollback** — one-click revert to a previous version (creates a new version entry pointing to the old content)
+
+---
+
+## 🧠 Self-Improving Agent
+
+> **Current state**: The agent can use MCP tools but cannot create new skills, modify its own instructions, or install new capabilities. OpenClaw allowed skills to self-modify and execute arbitrary code — this led to the "Malicious ClawHub Skills" exploit chain. OpenMacaw's approach is security-hardened: all self-improvement actions are **proposals requiring human approval**, never silent mutations.
+> **Depends on**: Skills System must be implemented first.
+
+### Internal Agent Tools
+- [ ] **`create_skill` tool** — the agent can call this to propose a new skill with a name, description, and instructions body. The proposal is surfaced to the user as an approval card in the chat UI (similar to tool call approval). On approval, the skill is persisted to the `skills` table as a personal skill owned by the session's user. On denial, the proposal is discarded with optional feedback
+- [ ] **`update_skill` tool** — the agent can propose modifications to an existing skill's instructions. Shows a diff in the approval card. On approval, creates a new `skill_versions` entry and updates the skill. The agent must reference an existing skill by ID or name
+- [ ] **`install_mcp_server` tool** — the agent can propose installing a new MCP server from the Catalog (reuses the existing one-click install flow from `/api/registry`). The proposal card shows the server name, package, description, and a security risk label (curated vs. community). On approval, the server is registered and started via the existing `registry.ts` → `servers.ts` flow
+
+### Skill Suggestions
+- [ ] **Post-task skill suggestion** — after completing a multi-step task (detected by agent step count or tool call diversity), the agent can suggest creating a reusable skill from the workflow it just performed. The suggestion includes a draft skill name, description, and distilled instructions
+- [ ] **Suggestion suppression** — user can dismiss suggestions with "Don't suggest this again" (stored as a user preference) to avoid repetitive prompts
+- [ ] **Suggestion quality gate** — only suggest skills when the workflow involved 3+ distinct tool calls or spanned 5+ agent steps, to avoid trivial suggestions
+
+### Safety & Approval
+- [ ] **All self-improvement actions require human-in-the-loop approval** — the agent cannot silently create, modify, or delete skills. Every mutation surfaces an approval card in the chat UI with full details of the proposed change
+- [ ] **Approval card UI** — rich approval cards for `create_skill`, `update_skill`, and `install_mcp_server` proposals, showing the full content/diff and approve/deny buttons with optional feedback textarea
+- [ ] **Audit trail** — all self-improvement proposals (approved and denied) are logged to the `activity_log` with action type `skill_proposal` / `server_install_proposal`
+- [ ] **Rate limiting** — cap the number of self-improvement proposals per session (e.g. max 5 per session) to prevent agent loops that repeatedly propose skills
+- [ ] **No silent execution** — unlike OpenClaw where skills could execute arbitrary commands, OpenMacaw skills are instruction-only. The agent's proposed skills go through the same PermissionGuard pipeline as all other tool calls — skills cannot bypass permission checks
+
+---
+
+## ⏰ Scheduled Automation
+
+> **Current state**: Agent runs are triggered by user messages (chat) or external platform messages (Discord/Telegram/LINE pipelines). There is no way to run the agent on a timer. Architecturally similar to pipelines — a background runner calling the agent runtime on a trigger — just timer-triggered instead of message-triggered.
+> **Depends on**: Skills System (for skill-based schedules). Can be built in parallel with Skills for the prompt-only mode.
+
+### Database
+- [ ] **Add `schedules` table** — columns: `id` (UUID PK), `userId` (FK → `users.id`), `sessionId` (FK → `sessions.id`, nullable — `NULL` = create a new session per run), `name` (text), `cronExpression` (text — standard 5-field cron), `skillId` (FK → `skills.id`, nullable — if set, run this skill's instructions as the prompt), `prompt` (text — freeform prompt used when `skillId` is null), `enabled` (boolean, default true), `lastRun` (timestamp, nullable), `nextRun` (timestamp), `status` (text — `idle` / `running` / `error`), `errorMessage` (text, nullable), `createdAt`, `updatedAt`
+- [ ] **Add `schedule_runs` table** — columns: `id`, `scheduleId` (FK), `sessionId` (FK — the session used for this run), `startedAt`, `completedAt`, `status` (text — `success` / `error` / `timeout`), `errorMessage` (text, nullable), `toolCallCount` (integer), `tokenUsage` (JSON, nullable) — run history for debugging and monitoring
+
+### Scheduler Service
+- [ ] **Scheduler loop** — a lightweight service (using `node-cron` or a simple `setInterval` loop) that checks `schedules` table for rows where `enabled = true` and `nextRun <= now()`. On match, enqueue the run and update `nextRun` based on `cronExpression`
+- [ ] **Run execution** — each scheduled run creates or reuses a session, injects the `prompt` (or the referenced skill's `instructions`), and calls the agent runtime in `autoExecute` mode (same pattern as pipeline runs in `pipelines/`)
+- [ ] **Concurrency control** — only one run per schedule at a time; if a run is still in progress when the next trigger fires, skip and log a warning
+- [ ] **Timeout** — configurable per-schedule timeout (default 5 minutes); kill the agent run if it exceeds the limit
+- [ ] **Error handling** — on failure, set `status = 'error'`, store `errorMessage`, and optionally disable the schedule after N consecutive failures (configurable)
+
+### API Routes (`/api/schedules`)
+- [ ] `GET /api/schedules` — list schedules for the authenticated user; admins see all with user filter
+- [ ] `POST /api/schedules` — create a schedule; validate cron expression, resolve `skillId` if provided
+- [ ] `PUT /api/schedules/:id` — update a schedule; recalculate `nextRun` on cron change
+- [ ] `DELETE /api/schedules/:id` — delete a schedule and its run history
+- [ ] `POST /api/schedules/:id/run` — manually trigger an immediate run (bypasses cron timing)
+- [ ] `GET /api/schedules/:id/runs` — paginated run history with status, duration, token usage
+
+### Web UI — Schedules Management Page
+- [ ] **Schedules page** (`/schedules`) — list of all schedules with name, cron expression (human-readable), next run time, last run status, and enable/disable toggle
+- [ ] **Schedule editor** — create/edit form with name, cron builder (visual cron picker or freeform input with validation + human-readable preview), prompt textarea or skill selector dropdown, session reuse toggle, timeout configuration
+- [ ] **Run history view** — per-schedule run log showing start/end times, status, error messages, token usage, and a link to the session used for each run
+- [ ] **Next run preview** — show the next 5 scheduled fire times based on the cron expression for verification
+
+### Permissions & Security
+- [ ] **Owner-scoped execution** — scheduled runs use the schedule owner's `userId` for permission resolution, BYOK API key cascade (same as the existing `userSettings` → `settings` fallback), and session ownership
+- [ ] **Security policy per schedule** — configurable per schedule: `autoExecute` (full autonomy — all tool calls execute without approval, same as pipeline mode) or `queueApproval` (high-risk tool calls are queued for approval — the user reviews them on next visit to the Schedules page or via notification)
+- [ ] **Notification on completion** — optional webhook, email, or in-app notification when a scheduled run completes or errors
+- [ ] **Schedule CRUD scoped to owner** — users can only manage their own schedules; admins can view/manage all
+
+### Integration with Skills
+- [ ] **Skill-based schedules** — a schedule can reference a `skillId` instead of a freeform `prompt`; on run, the skill's current `instructions` are used as the agent prompt. This means updating the skill automatically updates all schedules that reference it
+- [ ] **Quick-schedule from skill** — on the Skills page, add a "Schedule this skill" action that pre-fills the schedule editor with the skill reference
+
+---
+
 *Last updated: March 2026 — security section expanded with Invariant Labs TPA, MCP Safety Audit (arXiv:2504.03767), and full codebase audit findings*
