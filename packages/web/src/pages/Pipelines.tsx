@@ -72,7 +72,7 @@ const STATUS_DOT: Record<PipelineStatus, string> = {
 // ── Empty config defaults ─────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG: Record<PipelineType, Record<string, string>> = {
-  discord: { botToken: '', channelId: '' },
+  discord: { botToken: '', channelId: '', mentionOnly: 'true' },
   telegram: { botToken: '', allowedChatIds: '' },
   line: { channelAccessToken: '', channelSecret: '' },
 };
@@ -85,12 +85,14 @@ type FieldMeta = {
   placeholder: string;
   secret?: boolean;
   hint?: string;
+  toggle?: boolean;
 };
 
 const CONFIG_FIELDS: Record<PipelineType, FieldMeta[]> = {
   discord: [
     { key: 'botToken', label: 'Bot Token', placeholder: 'MTxxxxxxxxxx...', secret: true, hint: 'From the Discord Developer Portal → Bot → Token' },
     { key: 'channelId', label: 'Channel ID (optional)', placeholder: '123456789012345678', hint: 'Only respond in this channel. Leave blank to respond everywhere.' },
+    { key: 'mentionOnly', label: 'Mention Only', placeholder: '', hint: 'When enabled, the bot only responds to messages that @mention it. Slash commands always work.', toggle: true },
   ],
   telegram: [
     { key: 'botToken', label: 'Bot Token', placeholder: '123456:ABCdef...', secret: true, hint: 'From @BotFather on Telegram' },
@@ -109,6 +111,7 @@ function buildConfig(type: PipelineType, raw: Record<string, string>): Record<st
     return {
       botToken: raw.botToken,
       ...(raw.channelId ? { channelId: raw.channelId } : {}),
+      mentionOnly: raw.mentionOnly !== 'false',
     };
   }
   if (type === 'telegram') {
@@ -123,7 +126,11 @@ function buildConfig(type: PipelineType, raw: Record<string, string>): Record<st
 
 function configToRaw(type: PipelineType, config: Record<string, unknown>): Record<string, string> {
   if (type === 'discord') {
-    return { botToken: String(config.botToken ?? ''), channelId: String(config.channelId ?? '') };
+    return {
+      botToken: String(config.botToken ?? ''),
+      channelId: String(config.channelId ?? ''),
+      mentionOnly: config.mentionOnly !== false ? 'true' : 'false',
+    };
   }
   if (type === 'telegram') {
     const ids = Array.isArray(config.allowedChatIds) ? config.allowedChatIds.join(', ') : '';
@@ -264,14 +271,28 @@ function AddPipelineModal({
             <p className="text-xs font-mono text-gray-400">Configuration</p>
             {CONFIG_FIELDS[type].map((field) => (
               <div key={field.key}>
-                <label className="block text-xs font-mono text-gray-500 mb-1">{field.label}</label>
-                <input
-                  type={field.secret ? 'password' : 'text'}
-                  value={rawConfig[field.key] ?? ''}
-                  onChange={(e) => setRawConfig({ ...rawConfig, [field.key]: e.target.value })}
-                  placeholder={field.placeholder}
-                  className="w-full px-3 py-2 bg-black border border-white/5 rounded-md text-sm text-gray-200 font-mono focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
-                />
+                {field.toggle ? (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={rawConfig[field.key] !== 'false'}
+                      onChange={(e) => setRawConfig({ ...rawConfig, [field.key]: e.target.checked ? 'true' : 'false' })}
+                      className="accent-cyan-500"
+                    />
+                    <span className="text-xs font-mono text-gray-400">{field.label}</span>
+                  </label>
+                ) : (
+                  <>
+                    <label className="block text-xs font-mono text-gray-500 mb-1">{field.label}</label>
+                    <input
+                      type={field.secret ? 'password' : 'text'}
+                      value={rawConfig[field.key] ?? ''}
+                      onChange={(e) => setRawConfig({ ...rawConfig, [field.key]: e.target.value })}
+                      placeholder={field.placeholder}
+                      className="w-full px-3 py-2 bg-black border border-white/5 rounded-md text-sm text-gray-200 font-mono focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                    />
+                  </>
+                )}
                 {field.hint && (
                   <p className="text-[10px] text-gray-600 mt-0.5">{field.hint}</p>
                 )}
@@ -460,14 +481,31 @@ function PipelineRow({
           {/* Config fields */}
           {CONFIG_FIELDS[pipeline.type].map((field) => (
             <div key={field.key}>
-              <label className="block text-xs font-mono text-gray-500 mb-1">{field.label}</label>
-              <input
-                type={field.secret ? 'password' : 'text'}
-                value={editRaw[field.key] ?? ''}
-                onChange={(e) => setEditRaw({ ...editRaw, [field.key]: e.target.value })}
-                placeholder={field.placeholder}
-                className="w-full px-3 py-2 bg-black border border-white/10 rounded-md text-sm text-gray-200 font-mono focus:outline-none focus:ring-1 focus:ring-cyan-500"
-              />
+              {field.toggle ? (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editRaw[field.key] !== 'false'}
+                    onChange={(e) => setEditRaw({ ...editRaw, [field.key]: e.target.checked ? 'true' : 'false' })}
+                    className="accent-cyan-500"
+                  />
+                  <span className="text-xs font-mono text-gray-400">{field.label}</span>
+                </label>
+              ) : (
+                <>
+                  <label className="block text-xs font-mono text-gray-500 mb-1">{field.label}</label>
+                  <input
+                    type={field.secret ? 'password' : 'text'}
+                    value={editRaw[field.key] ?? ''}
+                    onChange={(e) => setEditRaw({ ...editRaw, [field.key]: e.target.value })}
+                    placeholder={field.placeholder}
+                    className="w-full px-3 py-2 bg-black border border-white/10 rounded-md text-sm text-gray-200 font-mono focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                  />
+                </>
+              )}
+              {field.hint && (
+                <p className="text-[10px] text-gray-600 mt-0.5">{field.hint}</p>
+              )}
             </div>
           ))}
 

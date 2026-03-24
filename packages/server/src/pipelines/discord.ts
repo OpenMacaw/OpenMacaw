@@ -105,7 +105,6 @@ export class DiscordPipeline {
     if (!cfg.botToken) throw new Error('Discord pipeline requires a botToken');
     if (!this.record.sessionId) throw new Error('Discord pipeline requires an assigned session');
 
-    const channelId   = cfg.channelId;
     const pipelineName = this.record.name;
     const pipelineId   = this.record.id;
 
@@ -171,6 +170,13 @@ export class DiscordPipeline {
 
         // Branch 3: slash commands.
         if (interaction.isChatInputCommand()) {
+          // Enforce channel binding for slash commands too.
+          const slashCfg = this.record.config as DiscordConfig;
+          if (slashCfg.channelId && interaction.channelId !== slashCfg.channelId) {
+            await interaction.reply({ content: 'This command is restricted to a different channel.', ephemeral: true });
+            return;
+          }
+
           if (interaction.commandName === 'agent') {
             this.handleAgentCommandAsync(
               interaction as ChatInputCommandInteraction,
@@ -197,9 +203,27 @@ export class DiscordPipeline {
     // ── Regular message handler ───────────────────────────────────────────────
     this.client.on('messageCreate', (message: Message) => {
       if (message.author.bot) return;
-      if (channelId && message.channelId !== channelId) return;
 
-      const content = message.content.trim();
+      // Read config live so updates (after restart) are always honoured.
+      const liveCfg = this.record.config as DiscordConfig;
+
+      // Channel binding — skip messages outside the configured channel.
+      if (liveCfg.channelId && message.channelId !== liveCfg.channelId) return;
+
+      // Mention-only mode (default: true) — only respond when @mentioned.
+      const mentionOnly = liveCfg.mentionOnly !== false; // undefined → true
+      if (mentionOnly) {
+        const botId = this.client?.user?.id;
+        if (!botId || !message.mentions.has(botId)) return;
+      }
+
+      // Strip the bot's own @mention from the message so the LLM sees clean text.
+      let content = message.content;
+      if (mentionOnly && this.client?.user?.id) {
+        content = content.replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '').trim();
+      } else {
+        content = content.trim();
+      }
       if (!content) {
         console.warn(
           `[Discord Pipeline: ${pipelineName}] Empty message.content — ` +

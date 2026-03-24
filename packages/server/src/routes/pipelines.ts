@@ -20,6 +20,7 @@ const pipelineTypeSchema = z.enum(['discord', 'telegram', 'line']);
 const discordConfigSchema = z.object({
   botToken: z.string().min(1),
   channelId: z.string().optional(),
+  mentionOnly: z.boolean().optional(),
 });
 
 const telegramConfigSchema = z.object({
