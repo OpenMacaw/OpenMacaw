@@ -1029,7 +1029,7 @@ function App() {
               {/* Middle Section: Pipeline Roadmap OR Live Event Stream */}
               <div
                 ref={inspectorRef}
-                className="flex-1 overflow-y-auto selection:bg-cyan-900/40 w-80"
+                className="flex-1 overflow-y-auto selection:bg-cyan-900/40 w-full"
               >
                 <AnimatePresence mode="wait">
                   {pipelineState ? (
@@ -1235,7 +1235,7 @@ function App() {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
-                      className="p-3 font-mono text-[11px] text-gray-500 space-y-1.5 w-80"
+                      className="p-3 font-mono text-[11px] text-gray-500 space-y-1.5 w-full"
                     >
                       {executionLogs.length === 0 && inspectorEntries.length === 0 ? (
                         <>
