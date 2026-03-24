@@ -97,7 +97,7 @@ export class AgentRuntime {
   /** Timestamps (ms) of every tool call fired in the current run() turn. */
   private toolCallTimestamps: number[] = [];
   private readonly RATE_LIMIT_WINDOW_MS = 10_000;
-  private readonly RATE_LIMIT_MAX_CALLS = 3;
+  private readonly RATE_LIMIT_MAX_CALLS = 8;
 
   
 
