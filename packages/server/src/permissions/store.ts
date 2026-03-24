@@ -21,10 +21,10 @@ export interface ServerPermission {
   maxTokensPerCall: number;
   promptInjectionPrevention?: boolean;
   toolPromptInjectionPrevention: Record<string, 'inherit' | 'enable' | 'disable'>;
-  // ── Trust Policy (Phase 46) ───────────────────────────────────────────────
-  autoApproveReads: boolean;   // Auto-execute safe read tools in trusted paths
-  trustedPaths: string[];      // Paths that are safe to auto-approve reads on
-  autoApproveAll: boolean;     // Auto-execute ALL permitted tool calls (skips Discord approval)
+  // ── Trust Policy ──────────────────────────────────────────────────────────
+  // Per-tool auto-approve: when true for a tool, it executes without user
+  // confirmation (ALLOW_SILENT). When false/absent, REQUIRE_APPROVAL.
+  toolAutoApprove: Record<string, boolean>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -57,9 +57,7 @@ export function getPermissionForServer(serverId: string): ServerPermission | nul
     maxTokensPerCall: perm.maxTokensPerCall,
     promptInjectionPrevention: Boolean((perm as any).prompt_injection_prevention ?? (perm as any).promptInjectionPrevention ?? false),
     toolPromptInjectionPrevention: JSON.parse((perm as any).toolPromptInjectionPrevention ?? (perm as any).tool_prompt_injection_prevention ?? '{}'),
-    autoApproveReads: Boolean((perm as any).autoApproveReads ?? (perm as any).auto_approve_reads ?? false),
-    trustedPaths: JSON.parse((perm as any).trustedPaths ?? (perm as any).trusted_paths ?? '[]'),
-    autoApproveAll: Boolean((perm as any).autoApproveAll ?? (perm as any).auto_approve_all ?? false),
+    toolAutoApprove: JSON.parse((perm as any).toolAutoApprove ?? (perm as any).tool_auto_approve ?? '{}'),
     createdAt: new Date(perm.createdAt),
     updatedAt: new Date(perm.updatedAt),
   };
@@ -90,9 +88,7 @@ export async function createDefaultPermission(serverId: string): Promise<ServerP
     max_tokens_per_call: 100000,
     prompt_injection_prevention: 0,
     tool_prompt_injection_prevention: '{}',
-    auto_approve_reads: 0,
-    trusted_paths: JSON.stringify([]),
-    auto_approve_all: 0,
+    tool_auto_approve: '{}',
     created_at: now,
     updated_at: now,
   };
@@ -120,9 +116,7 @@ export async function createDefaultPermission(serverId: string): Promise<ServerP
     updatedAt: new Date(now),
     promptInjectionPrevention: false,
     toolPromptInjectionPrevention: {},
-    autoApproveReads: false,
-    trustedPaths: [],
-    autoApproveAll: false,
+    toolAutoApprove: {},
   } as ServerPermission;
 }
 
@@ -151,9 +145,7 @@ export async function updatePermission(serverId: string, updates: Partial<Server
   if ((updates as any).toolPromptInjectionPrevention !== undefined) {
     dbUpdates.tool_prompt_injection_prevention = JSON.stringify((updates as any).toolPromptInjectionPrevention);
   }
-  if (updates.autoApproveReads !== undefined) dbUpdates.auto_approve_reads = updates.autoApproveReads ? 1 : 0;
-  if (updates.trustedPaths !== undefined) dbUpdates.trusted_paths = JSON.stringify(updates.trustedPaths);
-  if (updates.autoApproveAll !== undefined) dbUpdates.auto_approve_all = updates.autoApproveAll ? 1 : 0;
+  if (updates.toolAutoApprove !== undefined) dbUpdates.tool_auto_approve = JSON.stringify(updates.toolAutoApprove);
 
   db.update(schema.permissions as any).set(dbUpdates).where((getCol: (col: string) => unknown) => getCol('serverId') === serverId);
   
@@ -191,9 +183,7 @@ export function getAllPermissions(): ServerPermission[] {
     maxTokensPerCall: perm.maxTokensPerCall,
     promptInjectionPrevention: Boolean((perm as any).prompt_injection_prevention ?? (perm as any).promptInjectionPrevention ?? false),
     toolPromptInjectionPrevention: JSON.parse((perm as any).toolPromptInjectionPrevention ?? (perm as any).tool_prompt_injection_prevention ?? '{}'),
-    autoApproveReads: Boolean((perm as any).autoApproveReads ?? (perm as any).auto_approve_reads ?? false),
-    trustedPaths: JSON.parse((perm as any).trustedPaths ?? (perm as any).trusted_paths ?? '[]'),
-    autoApproveAll: Boolean((perm as any).autoApproveAll ?? (perm as any).auto_approve_all ?? false),
+    toolAutoApprove: JSON.parse((perm as any).toolAutoApprove ?? (perm as any).tool_auto_approve ?? '{}'),
     createdAt: new Date(perm.createdAt),
     updatedAt: new Date(perm.updatedAt),
   }));

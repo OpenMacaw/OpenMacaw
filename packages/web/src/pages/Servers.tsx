@@ -475,8 +475,8 @@ export default function Servers() {
                   <td className="px-4 py-3 font-medium text-gray-200">
                     <div className="flex items-center gap-2">
                       {server.name}
-                      {(server as any).autoApproveReads && (
-                        <span title="Auto-Approve Reads enabled" className="text-[9px] font-mono text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                      {(server as any).toolAutoApprove && Object.values((server as any).toolAutoApprove).some(Boolean) && (
+                        <span title="Some tools auto-approved" className="text-[9px] font-mono text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 px-1.5 py-0.5 rounded flex items-center gap-0.5">
                           ⚡ AUTO
                         </span>
                       )}
