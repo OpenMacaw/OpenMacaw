@@ -1716,24 +1716,22 @@ export default function Chat() {
         };
       });
 
-      // Deterministically wait for the socket to be OPEN — no timeout guesses.
-      // When a session was just created, the useEffect will create the WebSocket
-      // in response to the currentSessionId state update. Poll wsRef instead of
-      // creating a second socket (which races with the effect and gets closed).
-      let openWs: WebSocket;
-      if (justCreated) {
-        openWs = await waitForSocketRef(wsRef);
-      } else {
-        let ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          if (ws && ws.readyState !== WebSocket.CLOSED) {
-            ws.close();
-          }
-          ws = connectWebSocket();
-          wsRef.current = ws;
+      // Wait for a usable WebSocket. Never close a CONNECTING socket — that
+      // causes state=2 (CLOSING) races. Only create a new one when the current
+      // socket is dead (CLOSED/CLOSING) or absent. If the useEffect hasn't
+      // created one yet (e.g. just-created session), poll wsRef until it appears.
+      let ws = wsRef.current;
+      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        if (justCreated) {
+          // useEffect will create the socket once React processes the state update.
+          const readyWs = await waitForSocketRef(wsRef);
+          readyWs.send(JSON.stringify({ type: 'chat', sessionId: sid, message: msg }));
+          return;
         }
-        openWs = await waitForSocket(ws);
+        ws = connectWebSocket();
+        wsRef.current = ws;
       }
+      const openWs = await waitForSocket(ws);
       openWs.send(JSON.stringify({ type: 'chat', sessionId: sid, message: msg }));
     } catch (e: any) {
       console.error('[sendMessage] Failed:', e);
@@ -1779,14 +1777,14 @@ export default function Chat() {
       streamStartRef.current = Date.now();
 
       let ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
+      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
         ws = connectWebSocket();
         wsRef.current = ws;
       }
       const openWs = await waitForSocket(ws);
-      openWs.send(JSON.stringify({ 
-        type: 'regenerate', 
-        sessionId: currentSessionId 
+      openWs.send(JSON.stringify({
+        type: 'regenerate',
+        sessionId: currentSessionId
       }));
     } catch (e) {
       console.error('[Regenerate] Failed:', e);
@@ -1831,21 +1829,18 @@ export default function Chat() {
         };
       });
 
-      // Deterministically wait for the socket to be OPEN — no timeout guesses.
-      let openWs: WebSocket;
-      if (justCreated) {
-        openWs = await waitForSocketRef(wsRef);
-      } else {
-        let ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          if (ws && ws.readyState !== WebSocket.CLOSED) {
-            ws.close();
-          }
-          ws = connectWebSocket();
-          wsRef.current = ws;
+      // Wait for a usable WebSocket — same logic as handleSend.
+      let ws = wsRef.current;
+      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        if (justCreated) {
+          const readyWs = await waitForSocketRef(wsRef);
+          readyWs.send(JSON.stringify({ type: 'chat', sessionId: sid, message: prompt }));
+          return;
         }
-        openWs = await waitForSocket(ws);
+        ws = connectWebSocket();
+        wsRef.current = ws;
       }
+      const openWs = await waitForSocket(ws);
       openWs.send(JSON.stringify({ type: 'chat', sessionId: sid, message: prompt }));
     } catch (e: any) {
       console.error('[sendQuickAction] Failed:', e);
